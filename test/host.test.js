@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { adoptSessionIntoWorkspace, bindModelSelection, createHostService, listWorkspaceChoices, makeLiveSessionPort, resolveDefaultModel, resolveSessionPlacement, unarchiveSession, waitForAgentTurn } from '../lib/host.js'
+import { adoptSessionIntoWorkspace, bindModelSelection, createHostService, listModelChoices, listWorkspaceChoices, makeLiveSessionPort, resolveDefaultModel, resolveJobModel, resolveSessionPlacement, unarchiveSession, waitForAgentTurn } from '../lib/host.js'
 import { workspaceVisibleIds } from '../lib/isolation.js'
 
 function createFakeAgent() {
@@ -121,11 +121,24 @@ test('host service: create, list, run-now, history, and workspace isolation', as
   assert.equal(job.enabled, true)
   assert.equal(job.cwd, '/tmp/cron-workspace')
   assert.equal(job.timeoutMinutes, 15)
+  assert.equal(job.provider, '')
+  assert.equal(job.model, '')
   assert.ok(job.nextRunAt > clock)
 
+  const pinned = await service.createJob({
+    name: 'pinned-model',
+    prompt: 'use this model',
+    schedule: { kind: 'cron', expr: '0 10 * * *', timezone: 'Asia/Shanghai' },
+    provider: 'minimax-cn',
+    model: 'MiniMax-M3',
+  })
+  assert.equal(pinned.provider, 'minimax-cn')
+  assert.equal(pinned.model, 'MiniMax-M3')
+
   const listed = await service.listJobs()
-  assert.equal(listed.length, 1)
-  assert.equal(listed[0].id, job.id)
+  assert.equal(listed.length, 2)
+  assert.ok(listed.some((row) => row.id === job.id))
+  assert.ok(listed.some((row) => row.id === pinned.id && row.model === 'MiniMax-M3'))
 
   const result = await service.dispatchRun(job.id, 'run-now')
   assert.ok(result.run)
@@ -449,6 +462,68 @@ test('adoptSessionIntoWorkspace attaches a fork whose cwd matches a workspace', 
   const result = await adoptSessionIntoWorkspace(ctx, 'child-1')
   assert.equal(result.attached, true)
   assert.deepEqual(attached, ['child-1'])
+})
+
+test('resolveJobModel prefers a pinned job model over the New Session default', async () => {
+  const ctx = {
+    get(name) {
+      if (name === 'agentDefaultModel') {
+        return { currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-chat' }) }
+      }
+      return undefined
+    },
+  }
+  const pinned = await resolveJobModel(ctx, { provider: 'minimax-cn', model: 'MiniMax-M3' })
+  assert.deepEqual(pinned, { provider: 'minimax-cn', model: 'MiniMax-M3' })
+  const fallback = await resolveJobModel(ctx, { provider: '', model: '' })
+  assert.equal(fallback.provider, 'deepseek')
+  assert.equal(fallback.model, 'deepseek-chat')
+})
+
+test('listModelChoices maps llm providers and the current default', async () => {
+  const ctx = {
+    get(name) {
+      if (name === 'agentDefaultModel') {
+        return { currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-chat' }) }
+      }
+      if (name === 'llm') {
+        return {
+          listProviders: () => [{ id: 'minimax-cn', name: 'MiniMax' }],
+          async listModels(provider) {
+            assert.equal(provider, 'minimax-cn')
+            return [{ id: 'MiniMax-M3', name: 'M3', provider }]
+          },
+        }
+      }
+      return undefined
+    },
+  }
+  const catalog = await listModelChoices(ctx)
+  assert.equal(catalog.current.model, 'deepseek-chat')
+  assert.deepEqual(catalog.groups, [{
+    provider: 'minimax-cn',
+    displayName: 'MiniMax',
+    models: [{ id: 'MiniMax-M3', name: 'M3' }],
+  }])
+})
+
+test('GET /models lists session-port catalog', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createHostService({
+    filePath: join(dir, 'store.json'),
+    sessionPort: {
+      async listModels() {
+        return { groups: [{ provider: 'deepseek', displayName: 'DeepSeek', models: [{ id: 'deepseek-chat', name: 'Chat' }] }], current: { provider: 'deepseek', model: 'deepseek-chat' } }
+      },
+    },
+  })
+  const http = await listen(service)
+  t.after(() => http.close())
+  const res = await jsonRequest(http.url, '/dsh-cron-tasks/models')
+  assert.equal(res.status, 200)
+  assert.equal(res.body.current.model, 'deepseek-chat')
+  assert.equal(res.body.groups[0].models[0].id, 'deepseek-chat')
 })
 
 test('listWorkspaceChoices maps registry entries to title and path', () => {

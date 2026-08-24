@@ -80,6 +80,22 @@ v1 用 `workspaceRegistry.archiveSession` 从工作区列表拿掉。归档当�
 
 ---
 
+## 每个任务要能指定模型
+
+到点跑的会话会打对应厂商的额度。如果只用「当时新会话默认」，用户不知道扣的是哪家，聊天里一换模型，定时任务也跟着变。
+
+定下来：
+
+- 任务可存 `provider` + `model`（可选 `reasoningEffort`）
+- 编辑器下拉已配置的模型；也可选「每次运行用当时的新会话默认」
+- 新建时默认钉死**当前**新会话模型，避免空白
+- `cron_create` 没传就快照当前会话模型
+- 列表标题旁显示模型名
+
+空 provider/model 才在 fire 时读 `agentDefaultModel`。
+
+---
+
 ## 执行失败 `{{model}}` 没有值
 
 `agents.create` 不自动带上「新会话」用的默认模型。Persona 模板插 `{{model}}`，空值会让整轮装配失败。

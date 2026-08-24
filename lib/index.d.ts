@@ -17,8 +17,14 @@ export function createHostService(options?: object): object
 export function makeLiveSessionPort(ctx: object): object
 export function resolveSessionPlacement(ctx: object, job?: object): { cwd: string, workspace: object | null }
 export function listWorkspaceChoices(ctx: object): Array<{ id: string, title: string, path: string }>
+export function listModelChoices(ctx: object): Promise<{ groups: Array<{ provider: string, displayName: string, models: Array<{ id: string, name: string }> }>, current: { provider: string, model: string, reasoningEffort?: string } | null }>
+export function resolveJobModel(ctx: object, job?: object): Promise<{ provider: string, model: string, reasoningEffort?: string }>
+export function currentDefaultModel(ctx: object): { provider: string, model: string, reasoningEffort?: string } | null
+export function normalizeJobModel(input?: object): { provider: string, model: string, reasoningEffort: string }
 export function callerWorkingDirectory(exec?: object): string
 export function resolveCreateCwd(args?: object, exec?: object): string
+export function resolveCreateModel(args?: object, exec?: object): { provider: string, model: string, reasoningEffort: string }
+export function callerModelSelection(exec?: object): { provider: string, model: string, reasoningEffort: string }
 export function scheduleFromArgs(args?: object, nowMs?: number): { kind: string, at?: string, expr?: string, timezone: string }
 export function adoptSessionIntoWorkspace(ctx: object, sessionId: string): Promise<{ ok: boolean, attached: boolean, sessionId?: string, cwd?: string | null, workspaceId?: string | null }>
 export function shouldHideNativeWorkspaceGroup(input: { sessionRowCount: number, visibleSessionCount: number, ungrouped?: boolean, cronLabeled?: boolean }): boolean

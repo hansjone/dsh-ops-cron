@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { createHostService } from '../lib/host.js'
-import { callerWorkingDirectory, cronToolDefinitions, registerCronGuidance, registerCronTools, resolveCreateCwd, scheduleFromArgs } from '../lib/tools.js'
+import { callerWorkingDirectory, cronToolDefinitions, registerCronGuidance, registerCronTools, resolveCreateCwd, resolveCreateModel, scheduleFromArgs } from '../lib/tools.js'
 
 async function makeService(t) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tools-'))
@@ -78,11 +78,42 @@ test('cron_create cwd defaults to the calling session workspace path', async (t)
   assert.equal(explicit.job.cwd, '/tmp/isolated')
 })
 
+test('cron_create snapshots the calling session model when provider is omitted', async (t) => {
+  const service = await makeService(t)
+  const tools = byName(cronToolDefinitions(service))
+  const created = await tools.cron_create.execute({
+    name: 'from-chat-model',
+    prompt: 'ping',
+    hour: 23,
+    minute: 1,
+    timezone: 'Asia/Shanghai',
+  }, { agent: { options: { provider: 'minimax-cn', model: 'MiniMax-M3' }, session: { header: { cwd: '/tmp/ws-app' } } } })
+  assert.equal(created.job.provider, 'minimax-cn')
+  assert.equal(created.job.model, 'MiniMax-M3')
+
+  const explicit = await tools.cron_create.execute({
+    name: 'pinned',
+    prompt: 'ping',
+    hour: 23,
+    minute: 2,
+    timezone: 'Asia/Shanghai',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+  }, { agent: { options: { provider: 'minimax-cn', model: 'MiniMax-M3' } } })
+  assert.equal(explicit.job.provider, 'deepseek')
+  assert.equal(explicit.job.model, 'deepseek-chat')
+})
+
 test('resolveCreateCwd prefers explicit cwd then the calling session', () => {
   assert.equal(resolveCreateCwd({ cwd: '/tmp/a' }, { agent: { session: { header: { cwd: '/ws' } } } }), '/tmp/a')
   assert.equal(callerWorkingDirectory({ agent: { session: { header: { cwd: '/ws' } } } }), '/ws')
   assert.equal(resolveCreateCwd({}, { agent: { session: { header: { cwd: '/ws' } } } }), '/ws')
   assert.equal(resolveCreateCwd({}, {}), '')
+  assert.deepEqual(resolveCreateModel({}, { agent: { options: { provider: 'minimax-cn', model: 'MiniMax-M3' } } }), {
+    provider: 'minimax-cn',
+    model: 'MiniMax-M3',
+    reasoningEffort: '',
+  })
 })
 
 test('cron_create hour+minute uses today and rejects a guessed past calendar date', async (t) => {
