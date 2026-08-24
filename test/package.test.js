@@ -60,6 +60,7 @@ test('installable bundle declares host apply, client half, unique id, and no @de
   assert.match(client, /dsh-ct-entry/)
   assert.match(client, /centerCol/)
   assert.match(client, /data-dsh-ct-host/)
+  assert.match(client, /_collapsed\]\[data-dsh-ct-mode=on\] \.dsh-ct-region/)
   assert.match(client, /visibility:hidden/)
   assert.match(client, /createPortal\(editor, paneHost\)/)
   assert.match(client, /sidebarCollapsed/)
