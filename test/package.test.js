@@ -61,6 +61,8 @@ test('installable bundle declares host apply, client half, unique id, and no @de
   assert.match(client, /sidebarCollapsed/)
   assert.match(client, /_collapsed/)
   assert.match(client, /width:36px/)
+  assert.match(client, /data-collapsed/)
+  assert.match(client, /translate\(-50%, -50%\)/)
   assert.match(client, /返回工作区/)
   assert.match(client, /runs\/\$\{run\.id\}\/open/)
   assert.match(client, /regionArea/)
