@@ -1,0 +1,4 @@
+# Insert this plugin into a profile's layer stack.
+- insert:
+    - id: dsh-cron-tasks
+      name: '@dsh-external/dsh-cron-tasks'
