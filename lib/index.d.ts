@@ -1,8 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 
-export const name: 'dsh-cron-tasks'
+export const name: 'dsh-ops-cron'
 export const inject: string[]
-export const NS: 'dsh-cron-tasks'
+export const NS: 'dsh-ops-cron'
 
 export interface Config {
   enabled?: boolean
@@ -41,3 +41,6 @@ export function extractAssistantText(messages: object[], maxChars?: number): str
 export const TITLE_PREFIX: string
 export function claimOccurrence(state: object, jobId: string, now: number, trigger: string, policies?: object): object
 export function executeClaimedRun(state: object, runId: string, deps: object): Promise<object>
+export function normalizeDelivery(input?: object): { kind: 'dsh' | 'im', botId?: string, targetId?: string }
+export function resolveCreateDelivery(args?: object, exec?: object, deps?: object): Promise<{ kind: 'dsh' | 'im', botId?: string, targetId?: string }>
+export function deliverRunToIm(job: object, summary?: string, deps?: object): Promise<object>

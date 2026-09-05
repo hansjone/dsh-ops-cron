@@ -89,7 +89,7 @@ async function jsonRequest(base, path, options = {}) {
 }
 
 test('host service: create, list, run-now, history, and workspace isolation', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
 
   const archived = []
@@ -163,7 +163,7 @@ test('host service: create, list, run-now, history, and workspace isolation', as
 })
 
 test('overlap skip writes a skipped history row instead of a second session', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   let clock = Date.parse('2026-08-24T01:00:00.000Z')
   let inflight = 0
@@ -192,7 +192,7 @@ test('overlap skip writes a skipped history row instead of a second session', as
 })
 
 test('shipped HTTP handler: create, list, run-now, history', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const archived = []
   const service = createHostService({
@@ -210,7 +210,7 @@ test('shipped HTTP handler: create, list, run-now, history', async (t) => {
   const http = await listen(service)
   t.after(() => http.close())
 
-  const created = await jsonRequest(http.url, '/dsh-cron-tasks/jobs', {
+  const created = await jsonRequest(http.url, '/dsh-ops-cron/jobs', {
     method: 'POST',
     body: JSON.stringify({
       name: 'http job',
@@ -222,23 +222,23 @@ test('shipped HTTP handler: create, list, run-now, history', async (t) => {
   assert.equal(created.body.job.name, 'http job')
   const jobId = created.body.job.id
 
-  const listed = await jsonRequest(http.url, '/dsh-cron-tasks/jobs')
+  const listed = await jsonRequest(http.url, '/dsh-ops-cron/jobs')
   assert.equal(listed.body.jobs.length, 1)
 
-  const ran = await jsonRequest(http.url, `/dsh-cron-tasks/jobs/${jobId}/run`, { method: 'POST' })
+  const ran = await jsonRequest(http.url, `/dsh-ops-cron/jobs/${jobId}/run`, { method: 'POST' })
   assert.equal(ran.status, 200)
   assert.equal(ran.body.run.sessionId, 'http-sess-1')
   assert.ok(['succeeded', 'running'].includes(ran.body.run.status))
   assert.deepEqual(archived, ['http-sess-1'])
 
-  const history = await jsonRequest(http.url, '/dsh-cron-tasks/history')
+  const history = await jsonRequest(http.url, '/dsh-ops-cron/history')
   assert.ok(history.body.runs.some((row) => row.sessionId === 'http-sess-1'))
-  const visible = await jsonRequest(http.url, '/dsh-cron-tasks/workspace-visible?id=http-sess-1&id=other')
+  const visible = await jsonRequest(http.url, '/dsh-ops-cron/workspace-visible?id=http-sess-1&id=other')
   assert.deepEqual(visible.body.visible, ['other'])
 })
 
 test('POST /runs/:id/open reveals the run session id', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const revealed = []
   const service = createHostService({
@@ -253,7 +253,7 @@ test('POST /runs/:id/open reveals the run session id', async (t) => {
   })
   const http = await listen(service)
   t.after(() => http.close())
-  const created = await jsonRequest(http.url, '/dsh-cron-tasks/jobs', {
+  const created = await jsonRequest(http.url, '/dsh-ops-cron/jobs', {
     method: 'POST',
     body: JSON.stringify({
       name: 'open-job',
@@ -261,8 +261,8 @@ test('POST /runs/:id/open reveals the run session id', async (t) => {
       schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'Asia/Shanghai' },
     }),
   })
-  const ran = await jsonRequest(http.url, `/dsh-cron-tasks/jobs/${created.body.job.id}/run`, { method: 'POST' })
-  const opened = await jsonRequest(http.url, `/dsh-cron-tasks/runs/${ran.body.run.id}/open`, { method: 'POST' })
+  const ran = await jsonRequest(http.url, `/dsh-ops-cron/jobs/${created.body.job.id}/run`, { method: 'POST' })
+  const opened = await jsonRequest(http.url, `/dsh-ops-cron/runs/${ran.body.run.id}/open`, { method: 'POST' })
   assert.equal(opened.status, 200)
   assert.equal(opened.body.sessionId, 'open-sess')
   assert.deepEqual(revealed, ['open-sess'])
@@ -330,7 +330,7 @@ test('resolveDefaultModel fails loud when Models has no selection', async () => 
 })
 
 test('POST /conceal archives every run session id', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const archived = []
   const service = createHostService({
@@ -345,7 +345,7 @@ test('POST /conceal archives every run session id', async (t) => {
   })
   const http = await listen(service)
   t.after(() => http.close())
-  const created = await jsonRequest(http.url, '/dsh-cron-tasks/jobs', {
+  const created = await jsonRequest(http.url, '/dsh-ops-cron/jobs', {
     method: 'POST',
     body: JSON.stringify({
       name: 'hide-job',
@@ -353,15 +353,15 @@ test('POST /conceal archives every run session id', async (t) => {
       schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'Asia/Shanghai' },
     }),
   })
-  await jsonRequest(http.url, `/dsh-cron-tasks/jobs/${created.body.job.id}/run`, { method: 'POST' })
+  await jsonRequest(http.url, `/dsh-ops-cron/jobs/${created.body.job.id}/run`, { method: 'POST' })
   archived.length = 0
-  const hidden = await jsonRequest(http.url, '/dsh-cron-tasks/conceal', { method: 'POST' })
+  const hidden = await jsonRequest(http.url, '/dsh-ops-cron/conceal', { method: 'POST' })
   assert.equal(hidden.status, 200)
   assert.ok(archived.includes('hide-sess'))
 })
 
 test('one-shot at job fires once then later ticks wait instead of retriggering', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const at = Date.parse('2026-08-23T14:57:00.000Z')
   let clock = at - 60_000
@@ -508,7 +508,7 @@ test('listModelChoices maps llm providers and the current default', async () => 
 })
 
 test('GET /models lists session-port catalog', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const service = createHostService({
     filePath: join(dir, 'store.json'),
@@ -520,7 +520,7 @@ test('GET /models lists session-port catalog', async (t) => {
   })
   const http = await listen(service)
   t.after(() => http.close())
-  const res = await jsonRequest(http.url, '/dsh-cron-tasks/models')
+  const res = await jsonRequest(http.url, '/dsh-ops-cron/models')
   assert.equal(res.status, 200)
   assert.equal(res.body.current.model, 'deepseek-chat')
   assert.equal(res.body.groups[0].models[0].id, 'deepseek-chat')
@@ -547,7 +547,7 @@ test('listWorkspaceChoices maps registry entries to title and path', () => {
 })
 
 test('GET /workspaces lists session-port choices', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const service = createHostService({
     filePath: join(dir, 'store.json'),
@@ -559,13 +559,13 @@ test('GET /workspaces lists session-port choices', async (t) => {
   })
   const http = await listen(service)
   t.after(() => http.close())
-  const res = await jsonRequest(http.url, '/dsh-cron-tasks/workspaces')
+  const res = await jsonRequest(http.url, '/dsh-ops-cron/workspaces')
   assert.equal(res.status, 200)
   assert.deepEqual(res.body.workspaces, [{ id: 'ws-1', title: 'app', path: '/tmp/app' }])
 })
 
 test('POST /sessions/:id/adopt uses the session port', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const adopted = []
   const service = createHostService({
@@ -579,7 +579,7 @@ test('POST /sessions/:id/adopt uses the session port', async (t) => {
   })
   const http = await listen(service)
   t.after(() => http.close())
-  const res = await jsonRequest(http.url, '/dsh-cron-tasks/sessions/child-9/adopt', { method: 'POST' })
+  const res = await jsonRequest(http.url, '/dsh-ops-cron/sessions/child-9/adopt', { method: 'POST' })
   assert.equal(res.status, 200)
   assert.equal(res.body.attached, true)
   assert.deepEqual(adopted, ['child-9'])
@@ -598,7 +598,7 @@ test('waitForAgentTurn waits for running then idle, and fails if the agent never
 })
 
 test('after one live-shaped dispatch, the next run-now still fires', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const archived = []
   const sessionPort = makeLiveSessionPort(fakeLiveCtx(archived))
@@ -632,7 +632,7 @@ test('after one live-shaped dispatch, the next run-now still fires', async (t) =
 })
 
 test('after a live-shaped due tick settles, the next due occurrence still fires', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tasks-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const archived = []
   let clock = Date.parse('2026-08-24T01:00:00.000Z')

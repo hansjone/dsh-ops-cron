@@ -1,23 +1,25 @@
 {
-  "name": "@dsh-external/dsh-cron-tasks",
-  "description": "Scheduled tasks for DeepSeek Harness: sidebar entry under 新会话, plugin settings, and run history kept out of the workspace list.",
+  "name": "dsh-ops-cron",
+  "description": "Ops fork of dsh-cron-tasks: Agent cron_* tools + sidebar 运维定时, with DSH or WhatsApp/IM delivery per job.",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Whale-Zhang/dsh-cron-tasks.git"
+    "url": "git+https://github.com/hansjone/dsh-ops-cron.git"
   },
   "bugs": {
-    "url": "https://github.com/Whale-Zhang/dsh-cron-tasks/issues"
+    "url": "https://github.com/hansjone/dsh-ops-cron/issues"
   },
-  "homepage": "https://github.com/Whale-Zhang/dsh-cron-tasks#readme",
+  "homepage": "https://github.com/hansjone/dsh-ops-cron#readme",
   "keywords": [
     "dsh-plugin",
     "dsh",
     "deepseek-harness",
     "cron",
-    "scheduled-tasks"
+    "scheduled-tasks",
+    "ops",
+    "whatsapp"
   ],
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -35,6 +37,7 @@
     "cordis.patch.yml",
     "docs",
     "README.md",
+    "FORK.md",
     "LICENSE"
   ],
   "scripts": {

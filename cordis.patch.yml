@@ -1,4 +1,5 @@
-# Insert this plugin into a profile's layer stack.
+# Insert this ops cron plugin into a profile's layer stack.
+# Do not install upstream @dsh-external/dsh-cron-tasks alongside this package.
 - insert:
-    - id: dsh-cron-tasks
-      name: '@dsh-external/dsh-cron-tasks'
+    - id: dsh-ops-cron
+      name: dsh-ops-cron
