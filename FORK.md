@@ -25,7 +25,7 @@ dsh plugin --profile web add -w "D:\project\chatgpt\dsh-ops-cron"
 
 ## 相对上游的改动
 
-1. 包名 / cordis id / HTTP 前缀 / 侧栏文案 → `dsh-ops-cron` /「运维定时」
+1. 包名 / cordis id / HTTP 前缀仍为 `dsh-ops-cron`；侧栏产品文案为「定时任务」
 2. Job 增加 `delivery: { kind: 'dsh'|'im', botId?, targetId? }`
 3. `cron_create` 支持 `delivery` / `im_bot_id` / `im_target_id`；未显式指定时，若当前会话能 `resolveSessionPeer` 且已有匹配投递目标 → 默认 IM
 4. 开火后若 `delivery.kind === 'im'`，把 assistant 摘要经 `ctx.dshIm.send` 投回

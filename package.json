@@ -1,7 +1,7 @@
 {
   "name": "dsh-ops-cron",
-  "description": "Ops fork of dsh-cron-tasks: Agent cron_* tools + sidebar 运维定时, with DSH or WhatsApp/IM delivery per job.",
-  "version": "0.1.0",
+  "description": "Scheduled tasks for DeepSeek Harness: Agent cron_* tools + sidebar 定时任务, with DSH or WhatsApp/IM delivery per job.",
+  "version": "0.1.7",
   "private": false,
   "type": "module",
   "repository": {
