@@ -46,6 +46,8 @@ export function normalizeOrigin(input?: object): { kind: 'web' | 'im', sessionId
 export function resolveCreateDelivery(args?: object, exec?: object, deps?: object): Promise<{ kind: 'dsh' | 'im', botId?: string, targetId?: string }>
 export function resolveCreateOrigin(args?: object, exec?: object, deps?: object): Promise<{ kind: 'web' | 'im', sessionId?: string, peer?: object } | null>
 export function resolveMirrorSession(job: object, deps?: object): Promise<{ sessionId: string, via: string } | null>
+export function resolveCallerPeer(exec?: object, dshIm?: object): Promise<object | null>
+export function jobVisibleToPeer(job: object, peer: object): boolean
 export function formatRunResultBody(job: object, summary?: string): string
 export function deliverRunToIm(job: object, summary?: string, deps?: object): Promise<object>
 export function mirrorRunToSession(job: object, summary?: string, deps?: object): Promise<object>

@@ -237,6 +237,30 @@ test('shipped HTTP handler: create, list, run-now, history', async (t) => {
   assert.deepEqual(visible.body.visible, ['other'])
 })
 
+test('createJob ignores client-supplied id to prevent overwrite', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createHostService({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+  })
+  const first = await service.createJob({
+    name: 'keep-me',
+    prompt: 'first',
+    schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'Asia/Shanghai' },
+  })
+  const second = await service.createJob({
+    id: first.id,
+    name: 'attacker',
+    prompt: 'overwrite?',
+    schedule: { kind: 'cron', expr: '0 10 * * *', timezone: 'Asia/Shanghai' },
+  })
+  assert.notEqual(second.id, first.id)
+  const listed = await service.listJobs()
+  assert.equal(listed.find((job) => job.id === first.id)?.name, 'keep-me')
+  assert.equal(listed.find((job) => job.id === second.id)?.name, 'attacker')
+})
+
 test('POST /runs/:id/open reveals the run session id', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))

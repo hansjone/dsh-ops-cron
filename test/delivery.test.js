@@ -10,6 +10,7 @@ import {
   formatRunResultBody,
   deliverRunToIm,
   mirrorRunToSession,
+  jobVisibleToPeer,
 } from '../lib/delivery.js'
 
 test('normalizeDelivery defaults to dsh', () => {
@@ -307,8 +308,73 @@ test('mirrorRunToSession appends plugin notice without waking a turn', async () 
   assert.equal(appended[0][0], 'user/message')
   assert.match(appended[0][1].content[0].text, /日报/)
   assert.match(appended[0][1].content[0].text, /line one/)
+  assert.match(appended[0][1].content[0].text, /<system-reminder>/)
   assert.equal(appended[0][1].source.kind, 'plugin')
   assert.deepEqual(appended[0][2], { surfaceOp: 'append' })
+})
+
+test('matchTargetForPeer requires exact JID equality', () => {
+  const targets = [{
+    targetId: 'suffix-trap',
+    kind: 'user',
+    route: { jid: '8613800138000@s.whatsapp.net' },
+  }]
+  const peer = {
+    kind: 'direct',
+    conversationId: '13800138000@s.whatsapp.net',
+    phone: '13800138000',
+  }
+  assert.equal(matchTargetForPeer(targets, peer), null)
+})
+
+test('jobVisibleToPeer scopes IM ownership to origin conversation', () => {
+  const peer = {
+    botId: 'bot-a',
+    conversationKey: 'group:120363@g.us:user:1@lid',
+    conversationId: '120363@g.us',
+  }
+  assert.equal(jobVisibleToPeer({
+    origin: {
+      kind: 'im',
+      peer: { botId: 'bot-a', conversationKey: 'group:120363@g.us:user:1@lid', conversationId: '120363@g.us' },
+    },
+  }, peer), true)
+  assert.equal(jobVisibleToPeer({
+    origin: {
+      kind: 'im',
+      peer: { botId: 'bot-a', conversationKey: 'group:other@g.us', conversationId: 'other@g.us' },
+    },
+  }, peer), false)
+  assert.equal(jobVisibleToPeer({
+    origin: { kind: 'web', sessionId: 'web-1' },
+  }, peer), false)
+})
+
+test('resolveCreateDelivery binds IM peers to the current chat', async () => {
+  const peer = {
+    botId: 'bot-a',
+    conversationKey: 'direct:86138@s.whatsapp.net',
+    conversationId: '86138@s.whatsapp.net',
+    kind: 'direct',
+    phone: '86138',
+  }
+  const delivery = await resolveCreateDelivery(
+    { delivery: 'im', im_bot_id: 'other-bot', im_target_id: 'other-target' },
+    { agent: { session: { id: 'sess-im' } } },
+    {
+      dshIm: {
+        resolveSessionPeer: async () => peer,
+        listTargets: async () => [{
+          targetId: 'auto-dm',
+          kind: 'user',
+          route: { jid: '86138@s.whatsapp.net' },
+        }],
+      },
+    },
+  )
+  assert.equal(delivery.kind, 'im')
+  assert.equal(delivery.botId, 'bot-a')
+  assert.equal(delivery.targetId, 'auto-dm')
 })
 
 test('mirrorRunToSession resumes a cold origin session instead of create', async () => {
