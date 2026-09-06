@@ -3,8 +3,13 @@ import test from 'node:test'
 import {
   matchTargetForPeer,
   normalizeDelivery,
+  normalizeOrigin,
   resolveCreateDelivery,
+  resolveCreateOrigin,
+  resolveMirrorSession,
+  formatRunResultBody,
   deliverRunToIm,
+  mirrorRunToSession,
 } from '../lib/delivery.js'
 
 test('normalizeDelivery defaults to dsh', () => {
@@ -16,6 +21,26 @@ test('normalizeDelivery requires botId+targetId for im', () => {
   assert.deepEqual(
     normalizeDelivery({ kind: 'im', botId: 'bot_1', targetId: 'alerts' }),
     { kind: 'im', botId: 'bot_1', targetId: 'alerts' },
+  )
+})
+
+test('normalizeOrigin pins web and im shapes', () => {
+  assert.equal(normalizeOrigin(null), null)
+  assert.deepEqual(
+    normalizeOrigin({ kind: 'web', sessionId: 'sess-web' }),
+    { kind: 'web', sessionId: 'sess-web' },
+  )
+  assert.deepEqual(
+    normalizeOrigin({
+      kind: 'im',
+      sessionId: 'sess-im',
+      peer: { botId: 'bot_1', conversationKey: 'direct:86138@s.whatsapp.net', kind: 'direct' },
+    }),
+    {
+      kind: 'im',
+      sessionId: 'sess-im',
+      peer: { botId: 'bot_1', conversationKey: 'direct:86138@s.whatsapp.net', kind: 'direct' },
+    },
   )
 })
 
@@ -53,6 +78,37 @@ test('resolveCreateDelivery auto-matches peer target', async () => {
     agent: { session: { id: 'sess-1' } },
   }, { dshIm })
   assert.deepEqual(delivery, { kind: 'im', botId: 'bot_1', targetId: 'wa-dm' })
+})
+
+test('resolveCreateOrigin captures im peer from caller session', async () => {
+  const dshIm = {
+    resolveSessionPeer: async () => ({
+      botId: 'bot_1',
+      conversationKey: 'group:120363@g.us:user:86138@s.whatsapp.net',
+      conversationId: '120363@g.us',
+      kind: 'group',
+    }),
+  }
+  const origin = await resolveCreateOrigin({}, {
+    agent: { session: { id: 'sess-group' } },
+  }, { dshIm })
+  assert.deepEqual(origin, {
+    kind: 'im',
+    sessionId: 'sess-group',
+    peer: {
+      botId: 'bot_1',
+      conversationKey: 'group:120363@g.us:user:86138@s.whatsapp.net',
+      conversationId: '120363@g.us',
+      kind: 'group',
+    },
+  })
+})
+
+test('resolveCreateOrigin falls back to web when no peer', async () => {
+  const origin = await resolveCreateOrigin({}, {
+    agent: { session: { id: 'sess-web' } },
+  }, { dshIm: { resolveSessionPeer: async () => null } })
+  assert.deepEqual(origin, { kind: 'web', sessionId: 'sess-web' })
 })
 
 test('resolveCreateDelivery auto-creates group target when none exists', async () => {
@@ -151,7 +207,6 @@ test('resolveCreateDelivery pins group creator mention from peer', async () => {
     kind: 'im',
     botId: 'bot_wa',
     targetId: 'ops-group',
-    // Prefer phone JID over LID so WhatsApp can show nickname + notify.
     mentionJid: '8613800000000@s.whatsapp.net',
     mentionName: 'Alice',
   })
@@ -195,4 +250,124 @@ test('deliverRunToIm sends via dshIm', async () => {
   assert.equal(sent[0][1], 't')
   assert.match(sent[0][2], /定时任务/)
   assert.match(sent[0][2], /hello world/)
+})
+
+test('resolveMirrorSession prefers live conversation binding over stale origin.sessionId', async () => {
+  const hit = await resolveMirrorSession({
+    origin: {
+      kind: 'im',
+      sessionId: 'stale-sess',
+      peer: { botId: 'bot_1', conversationKey: 'direct:86138@s.whatsapp.net' },
+    },
+    delivery: { kind: 'im', botId: 'bot_1', targetId: 'wa-dm' },
+  }, {
+    dshIm: {
+      resolveConversationSession: async () => ({
+        sessionId: 'live-sess',
+        botId: 'bot_1',
+        conversationKey: 'direct:86138@s.whatsapp.net',
+      }),
+    },
+  })
+  assert.deepEqual(hit, { sessionId: 'live-sess', via: 'conversation' })
+})
+
+test('resolveMirrorSession falls back to origin.sessionId', async () => {
+  const hit = await resolveMirrorSession({
+    origin: { kind: 'web', sessionId: 'origin-web' },
+    delivery: { kind: 'dsh' },
+  }, {})
+  assert.deepEqual(hit, { sessionId: 'origin-web', via: 'origin' })
+})
+
+test('mirrorRunToSession appends plugin notice without waking a turn', async () => {
+  const appended = []
+  const result = await mirrorRunToSession(
+    {
+      name: '日报',
+      origin: { kind: 'web', sessionId: 'origin-1' },
+      delivery: { kind: 'dsh' },
+    },
+    'line one',
+    {
+      getAgents: () => ({
+        get: () => ({
+          session: {
+            append: (...args) => { appended.push(args) },
+          },
+        }),
+      }),
+      newId: () => 'msg-1',
+      pluginName: 'dsh-ops-cron',
+    },
+  )
+  assert.equal(result.mirrored, true)
+  assert.equal(result.method, 'append')
+  assert.equal(appended.length, 1)
+  assert.equal(appended[0][0], 'user/message')
+  assert.match(appended[0][1].content[0].text, /日报/)
+  assert.match(appended[0][1].content[0].text, /line one/)
+  assert.equal(appended[0][1].source.kind, 'plugin')
+  assert.deepEqual(appended[0][2], { surfaceOp: 'append' })
+})
+
+test('mirrorRunToSession resumes a cold origin session instead of create', async () => {
+  const appended = []
+  const resumed = []
+  const result = await mirrorRunToSession(
+    {
+      name: '冷会话',
+      origin: { kind: 'web', sessionId: 'cold-1' },
+    },
+    'hello',
+    {
+      getAgents: () => ({
+        get: () => null,
+        create: async () => {
+          throw new Error('create must not be used for origin mirror')
+        },
+        resume: async (opts) => {
+          resumed.push(opts)
+          return {
+            agent: {
+              session: {
+                append: (...args) => { appended.push(args) },
+              },
+            },
+          }
+        },
+      }),
+      newId: () => 'msg-2',
+    },
+  )
+  assert.equal(result.mirrored, true)
+  assert.equal(result.resumed, true)
+  assert.deepEqual(resumed, [{ resumeSessionId: 'cold-1' }])
+  assert.equal(appended[0][0], 'user/message')
+})
+
+test('mirrorRunToSession skips when origin session is unavailable', async () => {
+  const result = await mirrorRunToSession(
+    {
+      name: 'gone',
+      origin: { kind: 'web', sessionId: 'missing' },
+    },
+    'x',
+    {
+      getAgents: () => ({
+        get: () => null,
+        resume: async () => {
+          throw new Error('not found')
+        },
+      }),
+    },
+  )
+  assert.equal(result.mirrored, false)
+  assert.equal(result.reason, 'session_unavailable')
+})
+
+test('formatRunResultBody matches IM delivery header', () => {
+  const body = formatRunResultBody({ name: '晨报' }, 'ok')
+  assert.match(body, /^【定时任务 · 晨报】\n/)
+  assert.match(body, /ok$/)
 })
