@@ -80,6 +80,8 @@ async function jsonRequest(base, path, options = {}) {
       accept: 'application/json',
       origin: base,
       host: new URL(base).host,
+      'sec-fetch-site': 'same-origin',
+      cookie: options.anonymous ? '' : 'PORTALSSOUser=tester',
       ...(options.body ? { 'content-type': 'application/json' } : {}),
       ...options.headers,
     },
@@ -189,6 +191,38 @@ test('overlap skip writes a skipped history row instead of a second session', as
   assert.equal(second.run.status, 'skipped')
   assert.equal(second.run.reason, 'overlap')
   assert.equal(inflight, 1)
+})
+
+
+test('http api: anonymous list/run-now is rejected', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createHostService({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    sessionPort: {
+      async createAndPrompt() { return { sessionId: 'x', status: 'succeeded', summary: 'ok' } },
+      async archiveSession() {},
+    },
+  })
+  await service.createJob({
+    name: 'secret job',
+    prompt: 'do not leak',
+    schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' },
+  })
+  const http = await listen(service)
+  t.after(() => http.close())
+  const listed = await jsonRequest(http.url, '/dsh-ops-cron/jobs', { anonymous: true })
+  assert.equal(listed.status, 401)
+  assert.equal(listed.body.error, 'login_required')
+  const jobs = await jsonRequest(http.url, '/dsh-ops-cron/jobs')
+  assert.equal(jobs.status, 200)
+  const jobId = jobs.body.jobs[0].id
+  const ran = await jsonRequest(http.url, `/dsh-ops-cron/jobs/${jobId}/run`, {
+    method: 'POST',
+    anonymous: true,
+  })
+  assert.equal(ran.status, 401)
 })
 
 test('shipped HTTP handler: create, list, run-now, history', async (t) => {
