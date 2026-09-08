@@ -19,6 +19,27 @@ test('createJobRecord persists agentPreset', () => {
   assert.equal(job.agentPreset, 'ops-desk')
 })
 
+test('createJobRecord defaults mirrorToSession off and accepts explicit true', () => {
+  const base = {
+    name: 'n',
+    prompt: 'p',
+    schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'Asia/Shanghai' },
+  }
+  assert.equal(createJobRecord(base, emptyState(), Date.now()).mirrorToSession, false)
+  assert.equal(
+    createJobRecord({ ...base, mirrorToSession: true }, emptyState(), Date.now()).mirrorToSession,
+    true,
+  )
+  assert.equal(
+    createJobRecord({ ...base, mirror_to_session: true }, emptyState(), Date.now()).mirrorToSession,
+    true,
+  )
+  assert.equal(
+    createJobRecord({ ...base, mirrorToSession: 'yes' }, emptyState(), Date.now()).mirrorToSession,
+    false,
+  )
+})
+
 test('resolveCreateAgentPreset prefers explicit then peer then session then host default', async () => {
   assert.equal(
     await resolveCreateAgentPreset({ agent_preset: 'explicit' }, {}, {}),

@@ -974,3 +974,58 @@ test('migrateJobOwners assigns unassigned for legacy jobs', async () => {
   assert.equal(next.jobs[1].ownerEmpNo, 'from-session')
   assert.equal(next.jobs[2].ownerEmpNo, 'u1')
 })
+
+test('session mirror is off by default and runs only when mirrorToSession is true', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  const appended = []
+  const agents = {
+    get(sessionId) {
+      if (sessionId !== 'origin-web') return null
+      return {
+        session: {
+          append(...args) { appended.push(args) },
+        },
+      }
+    },
+  }
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    getAgents: () => agents,
+    sessionPort: {
+      async createAndPrompt({ job }) {
+        return { sessionId: `run-${job.id}`, status: 'succeeded', summary: `done ${job.name}` }
+      },
+      async archiveSession() {},
+    },
+  })
+
+  const off = await service.createJob({
+    name: 'no-mirror',
+    prompt: 'p',
+    schedule: { kind: 'at', at: '2099-01-01T00:00:00.000Z', timezone: 'UTC' },
+    origin: { kind: 'web', sessionId: 'origin-web' },
+  })
+  assert.equal(off.mirrorToSession, false)
+  await service.dispatchRun(off.id, 'run-now')
+  assert.equal(appended.length, 0)
+
+  const on = await service.createJob({
+    name: 'with-mirror',
+    prompt: 'p',
+    schedule: { kind: 'at', at: '2099-01-02T00:00:00.000Z', timezone: 'UTC' },
+    origin: { kind: 'web', sessionId: 'origin-web' },
+    mirrorToSession: true,
+  })
+  assert.equal(on.mirrorToSession, true)
+  await service.dispatchRun(on.id, 'run-now')
+  assert.equal(appended.length, 1)
+  assert.match(appended[0][1].content[0].text, /with-mirror/)
+
+  const patched = await service.updateJob(off.id, { mirrorToSession: true })
+  assert.equal(patched.mirrorToSession, true)
+  await service.dispatchRun(off.id, 'run-now')
+  assert.equal(appended.length, 2)
+})

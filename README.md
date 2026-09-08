@@ -5,7 +5,7 @@ Scheduled-task plugin for DeepSeek Harness (fork of [dsh-cron-tasks](https://git
 - Sidebar **定时任务** under New Session
 - Agent tools: `cron_create` / `cron_list` / `cron_pause` / `cron_resume` / `cron_delete`
 - Per-job delivery: **DSH** (new root session) or **IM** (`ctx.dshIm.send`)
-- After each fire, mirrors the summary into the **origin effective session** (creator Web chat or WhatsApp peer binding) so follow-ups share context
+- Optional per-job **session mirror** (default off): append the run summary into the origin Web/WhatsApp session for follow-ups
 
 See [FORK.md](FORK.md) for install notes. Do **not** install upstream `@dsh-external/dsh-cron-tasks` in the same profile.
 
@@ -41,13 +41,13 @@ Create stamps the logged-in empNo. Legacy / unclaimed jobs stay `__unassigned__`
 
 | Created from | Default delivery | Effective-session mirror |
 |--------------|------------------|--------------------------|
-| WhatsApp / IM session | `im` → reuse or **auto-create** a 投递目标 for that chat (group→group, DM→DM) | Live session for that `conversationKey` (latest binding) |
-| Web / plain DSH session | `dsh` → sidebar history session | Creator session pinned as `origin.sessionId` |
-| Explicit `delivery` / `im_bot_id`+`im_target_id` | as specified | Same mirror rules when `origin` / peer can be resolved |
+| WhatsApp / IM session | `im` → reuse or **auto-create** a 投递目标 for that chat (group→group, DM→DM) | Off unless `mirrorToSession` / `mirror_to_session=true` |
+| Web / plain DSH session | `dsh` → sidebar history session | Off unless opted in (origin still pinned as `origin.sessionId`) |
+| Explicit `delivery` / `im_bot_id`+`im_target_id` | as specified | Same: opt-in mirror when `origin` / peer can be resolved |
 
 You usually do **not** need to paste botId/targetId when creating from WhatsApp — omit `delivery` and the job binds to the current chat.
 
-**Execution session ≠ effective session.** Each fire still opens a fresh root Session for the Agent turn (visible under 定时任务 history). The mirrored notice is what makes the WhatsApp/Web chat you actually use able to continue from the result.
+**Execution session ≠ effective session.** Each fire still opens a fresh root Session for the Agent turn (visible under 定时任务 history). Enable **Mirror into origin session** (sidebar) or `mirror_to_session=true` (`cron_create`) only when you want the summary injected into the WhatsApp/Web chat you actually use.
 
 ## Agent preset
 
