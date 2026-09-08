@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { createHostService } from '../lib/host.js'
-import { callerWorkingDirectory, cronToolDefinitions, registerCronGuidance, registerCronTools, resolveCreateCwd, resolveCreateModel, scheduleFromArgs } from '../lib/tools.js'
+import { callerWorkingDirectory, cronToolDefinitions, registerCronGuidance, registerCronTools, resolveCreateCwd, resolveCreateModel, resolveToolIdentity, scheduleFromArgs } from '../lib/tools.js'
 
 async function makeService(t) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tools-'))
@@ -239,6 +239,25 @@ test('registerCronGuidance registers the scheduled-tasks skill only', () => {
   assert.match(skills[0].content, /hour/)
   off()
   assert.equal(skills.length, 0)
+})
+
+test('cron_create stamps ownerEmpNo from user-workspaces cwd', async (t) => {
+  const service = await makeService(t)
+  const tools = byName(cronToolDefinitions(service))
+  const exec = { agent: { session: { header: { cwd: '/tmp/user-workspaces/alice/app' } } } }
+  assert.equal(resolveToolIdentity(exec, service)?.empNo, 'alice')
+  const created = await tools.cron_create.execute({
+    name: 'owned',
+    prompt: 'ping',
+    after_minutes: 5,
+    timezone: 'Asia/Shanghai',
+  }, exec)
+  assert.equal(created.job.ownerEmpNo, 'alice')
+  assert.equal(created.job.cwd, '/tmp/user-workspaces/alice/app')
+
+  const listed = await tools.cron_list.execute({}, exec)
+  assert.equal(listed.count, 1)
+  assert.equal(listed.jobs[0].id, created.job.id)
 })
 
 test('registerCronTools registers each definition and disposer unregisters', () => {

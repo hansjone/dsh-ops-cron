@@ -865,6 +865,57 @@ test('host HTTP: per-user job isolation and super sees all', async (t) => {
   assert.equal(listTester2.body.jobs.length, 2)
 })
 
+test('GET /jobs claims unassigned jobs that match viewer cwd', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-claim-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+  })
+  const mine = await service.createJob({
+    name: 'orphan-mine',
+    prompt: 'x',
+    schedule: { kind: 'at', at: '2099-01-01T00:00:00.000Z', timezone: 'UTC' },
+    cwd: '/tmp/plain-a',
+  })
+  const other = await service.createJob({
+    name: 'orphan-other',
+    prompt: 'y',
+    schedule: { kind: 'at', at: '2099-01-01T00:00:00.000Z', timezone: 'UTC' },
+    cwd: '/tmp/plain-b',
+  })
+  // Simulate legacy rows: unassigned but cwd clearly under the viewer's workspace.
+  await service.store.mutate((current) => ({
+    ...current,
+    jobs: current.jobs.map((job) => {
+      if (job.id === mine.id) {
+        return {
+          ...job,
+          ownerEmpNo: '__unassigned__',
+          ownerDisplayName: '',
+          cwd: '/tmp/user-workspaces/tester/ws',
+        }
+      }
+      if (job.id === other.id) {
+        return {
+          ...job,
+          ownerEmpNo: '__unassigned__',
+          ownerDisplayName: '',
+          cwd: '/tmp/user-workspaces/peer/ws',
+        }
+      }
+      return job
+    }),
+  }))
+  const http = await listen(service)
+  t.after(() => http.close())
+  const listed = await jsonRequest(http.url, '/dsh-ops-cron/jobs', { empNo: 'tester' })
+  assert.equal(listed.status, 200)
+  assert.equal(listed.body.jobs.length, 1)
+  assert.equal(listed.body.jobs[0].name, 'orphan-mine')
+  assert.equal(listed.body.jobs[0].ownerEmpNo, 'tester')
+})
+
 test('migrateJobOwners assigns unassigned for legacy jobs', async () => {
   const { migrateJobOwners, UNASSIGNED_OWNER } = await import('../lib/ownership.js')
   const state = {

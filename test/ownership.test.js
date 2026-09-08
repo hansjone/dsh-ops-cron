@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   assertCanAccessJob,
   canViewAllJobs,
+  claimUnassignedForViewer,
   filterJobsForIdentity,
   filterRunsForJobs,
   inferOwnerEmpNo,
@@ -71,4 +72,24 @@ test('viewerPayload', () => {
   assert.equal(v.empNo, 'u1')
   assert.equal(v.canViewAll, false)
   assert.equal(v.workspacePath, '/w/u1')
+})
+
+test('claimUnassignedForViewer claims by session owner or user-workspaces cwd', () => {
+  const user = { empNo: 'u1', displayName: 'U1', permissions: { canViewAllSessions: false } }
+  const state = {
+    jobs: [
+      { id: 'a', ownerEmpNo: UNASSIGNED_OWNER, origin: { kind: 'web', sessionId: 's1' }, cwd: '/tmp/other' },
+      { id: 'b', ownerEmpNo: UNASSIGNED_OWNER, cwd: '/data/user-workspaces/u1/proj' },
+      { id: 'c', ownerEmpNo: UNASSIGNED_OWNER, cwd: '/data/user-workspaces/u2/proj' },
+      { id: 'd', ownerEmpNo: 'u2', cwd: '/data/user-workspaces/u1/x' },
+    ],
+  }
+  const { changed, state: next } = claimUnassignedForViewer(state, user, {
+    getSessionOwner: (id) => (id === 's1' ? 'u1' : null),
+  })
+  assert.equal(changed, true)
+  assert.equal(next.jobs[0].ownerEmpNo, 'u1')
+  assert.equal(next.jobs[1].ownerEmpNo, 'u1')
+  assert.equal(next.jobs[2].ownerEmpNo, UNASSIGNED_OWNER)
+  assert.equal(next.jobs[3].ownerEmpNo, 'u2')
 })
