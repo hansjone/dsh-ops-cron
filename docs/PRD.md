@@ -180,3 +180,18 @@
 - **入口位置**：无官方「新会话下方」slot；注入必须紧挨该按钮。仅 footer 不满足需求。
 - **Host 必须在跑**。写进本 PRD 与 README，避免被当成 bug。
 - 提示词按不可信内容包裹，降低提示注入把定时通道变成越权入口的风险。
+
+## 10. 多用户隔离（对齐 uds-auth 工作区）
+
+与侧栏工作区同一套角色：
+
+| 角色 | 定时任务 / 任务会话 |
+|------|---------------------|
+| `super_admin` / `fallback_admin` | 按用户文件夹看到全部；可改派 `ownerEmpNo` |
+| `admin` / `user` | 仅 `ownerEmpNo === 自己` |
+
+- Job 字段：`ownerEmpNo`、`ownerDisplayName`（创建时服务端盖章，客户端不可伪造）。
+- 存量无归属：IM origin → `__unassigned__`；Web 可尝试 `sessionAcl` 推断；否则 `__unassigned__`（仅超管可见）。
+- 依赖 Cordis 服务 `udsAuth`；未就绪时 HTTP API 返回 503，不回退为全员可见。
+- 调度器仍扫描全库 enabled jobs；归属只约束可见与写权限。
+- oclaw `scheduled_job`（管理后台）为另一套系统，本 PRD 不覆盖。

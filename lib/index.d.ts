@@ -15,7 +15,14 @@ export interface Config {
 export function apply(ctx: Context, config?: Config): void
 export function createHostService(options?: object): object
 export function makeLiveSessionPort(ctx: object): object
-export function resolveSessionPlacement(ctx: object, job?: object): { cwd: string, workspace: object | null }
+export function resolveSessionPlacement(ctx: object, job?: object, deps?: object): { cwd: string, workspace: object | null }
+export const UNASSIGNED_OWNER: '__unassigned__'
+export function jobVisibleToIdentity(job: object, identity: object): boolean
+export function canViewAllJobs(identity: object): boolean
+export function assertCanAccessJob(job: object, identity: object): object
+export function filterJobsForIdentity(jobs: object[], identity: object): object[]
+export function migrateJobOwners(state: object, deps?: object): { state: object, changed: boolean }
+export function viewerPayload(identity: object | null): object | null
 export function listWorkspaceChoices(ctx: object): Array<{ id: string, title: string, path: string }>
 export function listModelChoices(ctx: object): Promise<{ groups: Array<{ provider: string, displayName: string, models: Array<{ id: string, name: string }> }>, current: { provider: string, model: string, reasoningEffort?: string } | null }>
 export function resolveJobModel(ctx: object, job?: object): Promise<{ provider: string, model: string, reasoningEffort?: string }>

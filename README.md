@@ -17,6 +17,17 @@ dsh plugin --profile web add -w "github:hansjone/dsh-ops-cron"
 # restart dsh web
 ```
 
+## Multi-user isolation (with uds-auth)
+
+Requires **uds-auth** in the same profile. Jobs carry `ownerEmpNo`; visibility matches workspace ACL:
+
+| Role | Sees |
+|------|------|
+| `super_admin` / `fallback_admin` | All users’ jobs (sidebar groups by empNo folder) and their run sessions |
+| `admin` / `user` | Only own jobs and runs |
+
+Create stamps the logged-in empNo. Legacy jobs without owner migrate to `__unassigned__` (super-only). Fire cwd prefers the owner’s provisioned workspace under `user-workspaces/<empNo>`.
+
 ## Delivery defaults
 
 | Created from | Default delivery | Effective-session mirror |

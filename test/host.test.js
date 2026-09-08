@@ -74,6 +74,10 @@ async function listen(service) {
 }
 
 async function jsonRequest(base, path, options = {}) {
+  const empNo = options.empNo || 'tester'
+  const cookie = options.anonymous
+    ? ''
+    : (options.cookie || `PORTALSSOUser=${encodeURIComponent(empNo)}`)
   const response = await fetch(`${base}${path}`, {
     ...options,
     headers: {
@@ -81,7 +85,7 @@ async function jsonRequest(base, path, options = {}) {
       origin: base,
       host: new URL(base).host,
       'sec-fetch-site': 'same-origin',
-      cookie: options.anonymous ? '' : 'PORTALSSOUser=tester',
+      cookie,
       ...(options.body ? { 'content-type': 'application/json' } : {}),
       ...options.headers,
     },
@@ -90,6 +94,69 @@ async function jsonRequest(base, path, options = {}) {
   return { status: response.status, body }
 }
 
+function mockUdsAuth(options = {}) {
+  const owners = new Map()
+  const users = {
+    tester: { role: 'user', canViewAll: false, path: '/tmp/user-workspaces/tester', displayName: 'Tester' },
+    peer: { role: 'user', canViewAll: false, path: '/tmp/user-workspaces/peer', displayName: 'Peer' },
+    admin1: { role: 'super_admin', canViewAll: true, path: '/tmp/user-workspaces/admin1', displayName: 'Admin' },
+    administrator: { role: 'fallback_admin', canViewAll: true, path: '/tmp/user-workspaces/administrator', displayName: 'Fallback' },
+    ...(options.users || {}),
+  }
+  return {
+    async resolveRequestIdentity(req) {
+      const cookie = req?.headers?.cookie || ''
+      const match = /(?:PORTALSSOUser|UDS_FALLBACK_USER|UDS_FALLBACK_UI)=([^;]+)/.exec(cookie)
+      if (!match) return null
+      const empNo = decodeURIComponent(match[1].trim())
+      const row = users[empNo] || {
+        role: 'user',
+        canViewAll: false,
+        path: `/tmp/user-workspaces/${empNo}`,
+        displayName: empNo,
+      }
+      return {
+        empNo,
+        role: row.role,
+        displayName: row.displayName || empNo,
+        permissions: { canViewAllSessions: !!row.canViewAll },
+        workspacePath: row.path,
+      }
+    },
+    canViewAllJobs(identity) {
+      return !!identity?.permissions?.canViewAllSessions
+    },
+    getProvisionedWorkspacePath(empNo) {
+      return users[empNo]?.path || `/tmp/user-workspaces/${empNo}`
+    },
+    isUserPath(empNo, candidatePath) {
+      if (!candidatePath) return false
+      if (options.strictPath) {
+        const root = this.getProvisionedWorkspacePath(empNo)
+        const cand = String(candidatePath)
+        return cand === root || cand.startsWith(`${root}/`) || cand.startsWith(`${root}\\`)
+      }
+      return true
+    },
+    stampSessionOwner(sessionId, empNo) {
+      if (sessionId && empNo) owners.set(String(sessionId), String(empNo))
+    },
+    getSessionOwner(sessionId) {
+      return owners.get(String(sessionId)) || null
+    },
+  }
+}
+
+function createTestHost(options = {}) {
+  const { udsAuthOptions, udsAuth, ...rest } = options
+  const auth = udsAuth || mockUdsAuth(udsAuthOptions)
+  return createHostService({
+    ...rest,
+    getUdsAuth: () => auth,
+  })
+}
+
+
 test('host service: create, list, run-now, history, and workspace isolation', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
@@ -97,7 +164,7 @@ test('host service: create, list, run-now, history, and workspace isolation', as
   const archived = []
   let clock = Date.parse('2026-08-24T01:00:00.000Z')
   let sessionSeq = 0
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     now: () => clock,
     sessionPort: {
@@ -169,7 +236,7 @@ test('overlap skip writes a skipped history row instead of a second session', as
   t.after(() => rm(dir, { recursive: true, force: true }))
   let clock = Date.parse('2026-08-24T01:00:00.000Z')
   let inflight = 0
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     now: () => clock,
     sessionPort: {
@@ -197,7 +264,7 @@ test('overlap skip writes a skipped history row instead of a second session', as
 test('http api: anonymous list/run-now is rejected', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     now: () => Date.parse('2026-08-24T01:00:00.000Z'),
     sessionPort: {
@@ -209,7 +276,7 @@ test('http api: anonymous list/run-now is rejected', async (t) => {
     name: 'secret job',
     prompt: 'do not leak',
     schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' },
-  })
+  }, { empNo: 'tester', displayName: 'Tester', permissions: { canViewAllSessions: false } })
   const http = await listen(service)
   t.after(() => http.close())
   const listed = await jsonRequest(http.url, '/dsh-ops-cron/jobs', { anonymous: true })
@@ -217,6 +284,7 @@ test('http api: anonymous list/run-now is rejected', async (t) => {
   assert.equal(listed.body.error, 'login_required')
   const jobs = await jsonRequest(http.url, '/dsh-ops-cron/jobs')
   assert.equal(jobs.status, 200)
+  assert.equal(jobs.body.jobs.length, 1)
   const jobId = jobs.body.jobs[0].id
   const ran = await jsonRequest(http.url, `/dsh-ops-cron/jobs/${jobId}/run`, {
     method: 'POST',
@@ -229,7 +297,7 @@ test('shipped HTTP handler: create, list, run-now, history', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const archived = []
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     now: () => Date.parse('2026-08-24T01:00:00.000Z'),
     sessionPort: {
@@ -274,7 +342,7 @@ test('shipped HTTP handler: create, list, run-now, history', async (t) => {
 test('createJob ignores client-supplied id to prevent overwrite', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     now: () => Date.parse('2026-08-24T01:00:00.000Z'),
   })
@@ -299,7 +367,7 @@ test('POST /runs/:id/open reveals the run session id', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const revealed = []
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     now: () => Date.parse('2026-08-24T01:00:00.000Z'),
     sessionPort: {
@@ -391,7 +459,7 @@ test('POST /conceal archives every run session id', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const archived = []
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     now: () => Date.parse('2026-08-24T01:00:00.000Z'),
     sessionPort: {
@@ -424,7 +492,7 @@ test('one-shot at job fires once then later ticks wait instead of retriggering',
   const at = Date.parse('2026-08-23T14:57:00.000Z')
   let clock = at - 60_000
   let sessions = 0
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     now: () => clock,
     sessionPort: {
@@ -568,7 +636,7 @@ test('listModelChoices maps llm providers and the current default', async () => 
 test('GET /models lists session-port catalog', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     sessionPort: {
       async listModels() {
@@ -607,7 +675,7 @@ test('listWorkspaceChoices maps registry entries to title and path', () => {
 test('GET /workspaces lists session-port choices', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     sessionPort: {
       async listWorkspaces() {
@@ -626,7 +694,7 @@ test('POST /sessions/:id/adopt uses the session port', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const adopted = []
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     sessionPort: {
       async adoptSession(sessionId) {
@@ -660,7 +728,7 @@ test('after one live-shaped dispatch, the next run-now still fires', async (t) =
   t.after(() => rm(dir, { recursive: true, force: true }))
   const archived = []
   const sessionPort = makeLiveSessionPort(fakeLiveCtx(archived))
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     now: () => Date.parse('2026-08-24T01:00:00.000Z'),
     sessionPort,
@@ -695,7 +763,7 @@ test('after a live-shaped due tick settles, the next due occurrence still fires'
   const archived = []
   let clock = Date.parse('2026-08-24T01:00:00.000Z')
   const sessionPort = makeLiveSessionPort(fakeLiveCtx(archived))
-  const service = createHostService({
+  const service = createTestHost({
     filePath: join(dir, 'store.json'),
     now: () => clock,
     sessionPort,
@@ -719,4 +787,98 @@ test('after a live-shaped due tick settles, the next due occurrence still fires'
   assert.equal(secondTick[0].run.status, 'succeeded')
   assert.notEqual(secondTick[0].run.sessionId, firstTick[0].run.sessionId)
   assert.notEqual(secondTick[0].run.status, 'skipped')
+})
+
+
+test('host HTTP: per-user job isolation and super sees all', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-acl-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    sessionPort: {
+      async createAndPrompt({ job }) {
+        return { sessionId: `sess-${job.id}`, status: 'succeeded', summary: 'ok' }
+      },
+      async archiveSession() { return true },
+    },
+  })
+  const http = await listen(service)
+  t.after(() => http.close())
+
+  const noAuth = await jsonRequest(http.url, '/dsh-ops-cron/jobs', { anonymous: true })
+  assert.equal(noAuth.status, 401)
+
+  const createdA = await jsonRequest(http.url, '/dsh-ops-cron/jobs', {
+    method: 'POST',
+    empNo: 'tester',
+    body: JSON.stringify({
+      name: 'tester-job',
+      prompt: 'do a',
+      schedule: { kind: 'at', at: '2099-01-01T00:00:00.000Z', timezone: 'UTC' },
+    }),
+  })
+  assert.equal(createdA.status, 200)
+  assert.equal(createdA.body.job.ownerEmpNo, 'tester')
+  assert.ok(createdA.body.job.ownerDisplayName)
+
+  const createdB = await jsonRequest(http.url, '/dsh-ops-cron/jobs', {
+    method: 'POST',
+    empNo: 'peer',
+    body: JSON.stringify({
+      name: 'peer-job',
+      prompt: 'do b',
+      schedule: { kind: 'at', at: '2099-01-01T00:00:00.000Z', timezone: 'UTC' },
+    }),
+  })
+  assert.equal(createdB.status, 200)
+  assert.equal(createdB.body.job.ownerEmpNo, 'peer')
+
+  const listTester = await jsonRequest(http.url, '/dsh-ops-cron/jobs', { empNo: 'tester' })
+  assert.equal(listTester.status, 200)
+  assert.equal(listTester.body.jobs.length, 1)
+  assert.equal(listTester.body.jobs[0].name, 'tester-job')
+  assert.equal(listTester.body.viewer.canViewAll, false)
+
+  const listPeer = await jsonRequest(http.url, '/dsh-ops-cron/jobs', { empNo: 'peer' })
+  assert.equal(listPeer.body.jobs.length, 1)
+  assert.equal(listPeer.body.jobs[0].name, 'peer-job')
+
+  const forbidden = await jsonRequest(http.url, `/dsh-ops-cron/jobs/${createdB.body.job.id}`, { empNo: 'tester' })
+  assert.equal(forbidden.status, 404)
+
+  const listAdmin = await jsonRequest(http.url, '/dsh-ops-cron/jobs', { empNo: 'admin1' })
+  assert.equal(listAdmin.status, 200)
+  assert.equal(listAdmin.body.viewer.canViewAll, true)
+  assert.equal(listAdmin.body.jobs.length, 2)
+
+  const reassigned = await jsonRequest(http.url, `/dsh-ops-cron/jobs/${createdB.body.job.id}`, {
+    method: 'PATCH',
+    empNo: 'admin1',
+    body: JSON.stringify({ ownerEmpNo: 'tester', ownerDisplayName: 'Tester' }),
+  })
+  assert.equal(reassigned.status, 200)
+  assert.equal(reassigned.body.job.ownerEmpNo, 'tester')
+
+  const listTester2 = await jsonRequest(http.url, '/dsh-ops-cron/jobs', { empNo: 'tester' })
+  assert.equal(listTester2.body.jobs.length, 2)
+})
+
+test('migrateJobOwners assigns unassigned for legacy jobs', async () => {
+  const { migrateJobOwners, UNASSIGNED_OWNER } = await import('../lib/ownership.js')
+  const state = {
+    jobs: [
+      { id: '1', name: 'a', origin: { kind: 'im', peer: { botId: 'b' } } },
+      { id: '2', name: 'b', origin: { kind: 'web', sessionId: 's1' } },
+      { id: '3', name: 'c', ownerEmpNo: 'u1' },
+    ],
+  }
+  const { state: next, changed } = migrateJobOwners(state, {
+    getSessionOwner: (id) => (id === 's1' ? 'from-session' : null),
+  })
+  assert.equal(changed, true)
+  assert.equal(next.jobs[0].ownerEmpNo, UNASSIGNED_OWNER)
+  assert.equal(next.jobs[1].ownerEmpNo, 'from-session')
+  assert.equal(next.jobs[2].ownerEmpNo, 'u1')
 })
