@@ -18,8 +18,8 @@ test('jobVisibleToIdentity respects canViewAll and owner', () => {
   const admin = { empNo: 'a1', permissions: { canViewAllSessions: true } }
   assert.equal(jobVisibleToIdentity({ ownerEmpNo: 'u1' }, user), true)
   assert.equal(jobVisibleToIdentity({ ownerEmpNo: 'u2' }, user), false)
-  assert.equal(jobVisibleToIdentity({ ownerEmpNo: UNASSIGNED_OWNER }, user), true)
-  assert.equal(jobVisibleToIdentity({ ownerEmpNo: UNASSIGNED_OWNER, cwd: '/data/user-workspaces/u2/x' }, user), false)
+  assert.equal(jobVisibleToIdentity({ ownerEmpNo: UNASSIGNED_OWNER }, user), false)
+  assert.equal(jobVisibleToIdentity({ ownerEmpNo: UNASSIGNED_OWNER, cwd: '/data/user-workspaces/u1/x' }, user), false)
   assert.equal(jobVisibleToIdentity({ ownerEmpNo: UNASSIGNED_OWNER }, admin), true)
   assert.equal(canViewAllJobs(admin), true)
 })
@@ -84,7 +84,7 @@ test('claimUnassignedForViewer claims by session owner or user-workspaces cwd', 
       { id: 'c', ownerEmpNo: UNASSIGNED_OWNER, cwd: '/data/user-workspaces/u2/proj' },
       { id: 'd', ownerEmpNo: 'u2', cwd: '/data/user-workspaces/u1/x' },
       { id: 'e', ownerEmpNo: UNASSIGNED_OWNER, origin: { kind: 'im', peer: { botId: 'b' } } },
-      { id: 'f', ownerEmpNo: UNASSIGNED_OWNER, origin: { kind: 'web', sessionId: 'foreign' } },
+      { id: 'f', ownerEmpNo: UNASSIGNED_OWNER, origin: { kind: 'web', sessionId: 'orphan' } },
     ],
   }
   const { changed, state: next } = claimUnassignedForViewer(state, user, {
@@ -97,9 +97,9 @@ test('claimUnassignedForViewer claims by session owner or user-workspaces cwd', 
   assert.equal(changed, true)
   assert.equal(next.jobs[0].ownerEmpNo, 'u1')
   assert.equal(next.jobs[1].ownerEmpNo, 'u1')
-  // Foreign user-workspaces path must not be stolen.
   assert.equal(next.jobs[2].ownerEmpNo, UNASSIGNED_OWNER)
   assert.equal(next.jobs[3].ownerEmpNo, 'u2')
   assert.equal(next.jobs[4].ownerEmpNo, UNASSIGNED_OWNER)
+  // Unknown session owner: leave unassigned for admin-only visibility.
   assert.equal(next.jobs[5].ownerEmpNo, UNASSIGNED_OWNER)
 })
