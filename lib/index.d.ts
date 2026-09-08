@@ -17,6 +17,10 @@ export function createHostService(options?: object): object
 export function makeLiveSessionPort(ctx: object): object
 export function resolveSessionPlacement(ctx: object, job?: object, deps?: object): { cwd: string, workspace: object | null }
 export const UNASSIGNED_OWNER: '__unassigned__'
+export const LOCAL_EMP_NO: '__local__'
+export function isMultiUserIdentity(identity: object | null | undefined): boolean
+export function localIdentity(overrides?: object): object
+export function claimUnassignedForViewer(state: object, identity: object, deps?: object): { state: object, changed: boolean }
 export function jobVisibleToIdentity(job: object, identity: object): boolean
 export function canViewAllJobs(identity: object): boolean
 export function assertCanAccessJob(job: object, identity: object): object

@@ -7,7 +7,10 @@ import {
   filterJobsForIdentity,
   filterRunsForJobs,
   inferOwnerEmpNo,
+  isMultiUserIdentity,
   jobVisibleToIdentity,
+  LOCAL_EMP_NO,
+  localIdentity,
   migrateJobOwners,
   UNASSIGNED_OWNER,
   viewerPayload,
@@ -73,6 +76,23 @@ test('viewerPayload', () => {
   assert.equal(v.empNo, 'u1')
   assert.equal(v.canViewAll, false)
   assert.equal(v.workspacePath, '/w/u1')
+  assert.equal(v.mode, 'multi')
+})
+
+test('standalone local identity sees all jobs including unassigned', () => {
+  const local = localIdentity()
+  assert.equal(isMultiUserIdentity(local), false)
+  assert.equal(local.empNo, LOCAL_EMP_NO)
+  assert.equal(canViewAllJobs(local), true)
+  assert.equal(jobVisibleToIdentity({ ownerEmpNo: UNASSIGNED_OWNER }, local), true)
+  assert.equal(jobVisibleToIdentity({ ownerEmpNo: 'u2' }, local), true)
+  const payload = viewerPayload(local)
+  assert.equal(payload.mode, 'local')
+  assert.equal(payload.canViewAll, true)
+  assert.deepEqual(
+    filterJobsForIdentity([{ id: '1', ownerEmpNo: 'u1' }, { id: '2', ownerEmpNo: UNASSIGNED_OWNER }], local).map((j) => j.id),
+    ['1', '2'],
+  )
 })
 
 test('claimUnassignedForViewer claims by session owner or user-workspaces cwd', () => {

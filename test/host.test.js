@@ -916,6 +916,47 @@ test('GET /jobs claims unassigned jobs that match viewer cwd', async (t) => {
   assert.equal(listed.body.jobs[0].ownerEmpNo, 'tester')
 })
 
+
+test('HTTP works standalone without uds-auth (local mode)', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-local-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createHostService({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 'local-sess', status: 'succeeded', summary: 'ok' }
+      },
+      async archiveSession() {},
+    },
+    getUdsAuth: () => undefined,
+  })
+  const http = await listen(service)
+  t.after(() => http.close())
+
+  const created = await jsonRequest(http.url, '/dsh-ops-cron/jobs', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'local job',
+      prompt: 'ping',
+      schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' },
+    }),
+  })
+  assert.equal(created.status, 200)
+  assert.equal(created.body.job.name, 'local job')
+  assert.ok(!created.body.job.ownerEmpNo || created.body.job.ownerEmpNo === '__unassigned__')
+
+  const listed = await jsonRequest(http.url, '/dsh-ops-cron/jobs')
+  assert.equal(listed.status, 200)
+  assert.equal(listed.body.viewer.mode, 'local')
+  assert.equal(listed.body.viewer.canViewAll, true)
+  assert.equal(listed.body.jobs.length, 1)
+
+  const ran = await jsonRequest(http.url, `/dsh-ops-cron/jobs/${created.body.job.id}/run`, { method: 'POST' })
+  assert.equal(ran.status, 200)
+  assert.equal(ran.body.run.sessionId, 'local-sess')
+})
+
 test('migrateJobOwners assigns unassigned for legacy jobs', async () => {
   const { migrateJobOwners, UNASSIGNED_OWNER } = await import('../lib/ownership.js')
   const state = {

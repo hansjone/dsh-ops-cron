@@ -17,16 +17,25 @@ dsh plugin --profile web add -w "github:hansjone/dsh-ops-cron"
 # restart dsh web
 ```
 
-## Multi-user isolation (with uds-auth)
+## Auth modes (uds-auth is optional)
 
-Requires **uds-auth** in the same profile. Jobs carry `ownerEmpNo`; visibility matches workspace ACL:
+`uds-auth` is a soft dependency. Cron and IM plugins work without it.
+
+| Mode | When | Behavior |
+|------|------|----------|
+| **standalone / local** | `udsAuth` not provided | Trusted local/same-origin HTTP works with synthetic `__local__` identity; all jobs visible; flat sidebar (no user folders); create does not force an empNo |
+| **multi-user** | `uds-auth` installed and providing `ctx.udsAuth` | Jobs carry `ownerEmpNo`; Web login required; isolation matches workspace ACL |
+
+### Multi-user isolation (with uds-auth)
 
 | Role | Sees |
 |------|------|
 | `super_admin` / `fallback_admin` | All users’ jobs (sidebar groups by empNo folder) and their run sessions |
 | `admin` / `user` | Only own jobs and runs |
 
-Create stamps the logged-in empNo. Legacy jobs without owner migrate to `__unassigned__` (super-only). Fire cwd prefers the owner’s provisioned workspace under `user-workspaces/<empNo>`.
+Create stamps the logged-in empNo. Legacy / unclaimed jobs stay `__unassigned__` (super-only until claimed by session/cwd evidence). Fire cwd prefers the owner’s provisioned workspace under `user-workspaces/<empNo>`.
+
+**Channel / IM sessions are not a UDS account.** New WhatsApp/IM chats use the bot workspace (`workspaces.json`); they are not mapped to `administrator` or any empNo by default. IM cron jobs stay peer-scoped (or unassigned for Web ACL).
 
 ## Delivery defaults
 
