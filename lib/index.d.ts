@@ -59,6 +59,13 @@ export function resolveCreateOrigin(args?: object, exec?: object, deps?: object)
 export function resolveMirrorSession(job: object, deps?: object): Promise<{ sessionId: string, via: string } | null>
 export function resolveCallerPeer(exec?: object, dshIm?: object): Promise<object | null>
 export function jobVisibleToPeer(job: object, peer: object): boolean
-export function formatRunResultBody(job: object, summary?: string): string
+export function formatRunResultBody(job: object, summary?: string, locale?: string): string
 export function deliverRunToIm(job: object, summary?: string, deps?: object): Promise<object>
 export function mirrorRunToSession(job: object, summary?: string, deps?: object): Promise<object>
+export const DEFAULT_LOCALE: 'zh'
+export const TITLE_PREFIX_EN: string
+export const MESSAGES: Record<string, Record<string, string>>
+export function normalizeLocale(lang?: unknown): 'zh' | 'en'
+export function resolveLocale(req?: object | null, identity?: { lang?: string } | null): 'zh' | 'en'
+export function t(key: string, locale?: string, vars?: Record<string, string | number>): string
+export function apiError(code: string, locale?: string, vars?: Record<string, string | number>): { ok: false, error: string, message: string }

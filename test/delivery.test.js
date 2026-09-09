@@ -436,4 +436,6 @@ test('formatRunResultBody matches IM delivery header', () => {
   const body = formatRunResultBody({ name: '晨报' }, 'ok')
   assert.match(body, /^【定时任务 · 晨报】\n/)
   assert.match(body, /ok$/)
+  const en = formatRunResultBody({ name: 'Daily' }, 'ok', 'en')
+  assert.match(en, /^\[Scheduled tasks · Daily\]\n/)
 })

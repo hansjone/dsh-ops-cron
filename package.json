@@ -29,6 +29,7 @@
       "default": "./lib/index.js"
     },
     "./client": "./lib/client.js",
+    "./i18n": "./lib/i18n.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
