@@ -460,12 +460,18 @@ test('cron tool output schemas never use type arrays (Host rejects them)', () =>
   function walk(node, path) {
     if (!node || typeof node !== 'object') return
     if (Array.isArray(node.type)) bad.push(`${path}.type=${JSON.stringify(node.type)}`)
+    if (Object.hasOwn(node, 'additionalProperties') && typeof node.additionalProperties !== 'boolean') {
+      bad.push(`${path}.additionalProperties must be boolean (got ${typeof node.additionalProperties})`)
+    }
     if (Array.isArray(node.oneOf)) node.oneOf.forEach((branch, i) => walk(branch, `${path}.oneOf[${i}]`))
     if (node.properties && typeof node.properties === 'object') {
       for (const [key, child] of Object.entries(node.properties)) walk(child, `${path}.properties.${key}`)
     }
     if (node.items) walk(node.items, `${path}.items`)
   }
-  for (const def of defs) walk(def.output?.schema, def.name)
+  for (const def of defs) {
+    walk(def.output?.schema, `${def.name}.output`)
+    walk(def.parameters, `${def.name}.parameters`)
+  }
   assert.deepEqual(bad, [])
 })
