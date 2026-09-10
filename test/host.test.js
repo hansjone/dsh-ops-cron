@@ -603,10 +603,16 @@ test('resolveSessionPlacement keeps foreign cwd for super_admin owner under stri
   assert.equal(kept.cwd, 'D:/code/gpt')
 
   const clamped = resolveSessionPlacement(ctx, {
-    cwd: 'D:/code/gpt',
+    cwd: '/tmp/user-workspaces/peer/x',
     ownerEmpNo: 'tester',
   }, { udsAuth: uds })
   assert.equal(clamped.cwd, '/tmp/user-workspaces/tester')
+
+  const external = resolveSessionPlacement(ctx, {
+    cwd: 'D:/code/gpt',
+    ownerEmpNo: 'tester',
+  }, { udsAuth: uds })
+  assert.equal(external.cwd, 'D:/code/gpt')
 })
 
 test('resolveSessionPlacement prefers owner provisioned path over recent workspace when cwd empty', () => {
@@ -668,7 +674,18 @@ test('super_admin createJob keeps explicit foreign cwd; normal user is clamped',
     cwd: 'D:/code/gpt',
     schedule: { kind: 'cron', expr: '0 3 * * *', timezone: 'Asia/Shanghai' },
   }, userId)
-  assert.equal(userJob.cwd, '/tmp/user-workspaces/tester')
+  // Shared tree outside provision forest is kept (allowExternalCwd default).
+  assert.equal(userJob.cwd, 'D:/code/gpt')
+
+  await assert.rejects(
+    () => service.createJob({
+      name: 'steal',
+      prompt: 'no',
+      cwd: '/tmp/user-workspaces/peer/secret',
+      schedule: { kind: 'cron', expr: '0 4 * * *', timezone: 'Asia/Shanghai' },
+    }, userId),
+    (err) => err && err.code === 'CWD_FORBIDDEN',
+  )
 })
 
 test('createJob elevates via live resolveIdentityForEmpNo when caller permissions are empty', async (t) => {
