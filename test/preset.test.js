@@ -60,6 +60,23 @@ test('createJobRecord fires ASAP when one-shot at is slightly in the past', () =
   )
 })
 
+test('createStore recovers from NUL-corrupt store.json', async () => {
+  const { createStore } = await import('../lib/store.js')
+  const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-store-'))
+  const filePath = join(dir, 'store.json')
+  await writeFile(filePath, `{\u0000"jobs":[]}`, 'utf8')
+  const store = createStore({ filePath })
+  const state = await store.read()
+  assert.equal(Array.isArray(state.jobs), true)
+  assert.equal(state.jobs.length, 0)
+  const rewritten = await readFile(filePath, 'utf8')
+  assert.equal(rewritten.includes('\u0000'), false)
+  await rm(dir, { recursive: true, force: true })
+})
+
 test('resolveCreateAgentPreset prefers explicit then peer then session then host default', async () => {
   assert.equal(
     await resolveCreateAgentPreset({ agent_preset: 'explicit' }, {}, {}),
