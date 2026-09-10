@@ -125,14 +125,29 @@ test('claimUnassignedForViewer claims by session owner or user-workspaces cwd', 
   assert.equal(next.jobs[5].ownerEmpNo, UNASSIGNED_OWNER)
 })
 
-test('preferredNewJobCwd prefers provisioned viewer workspace over session cwd', () => {
+test('preferredNewJobCwd: users prefer provisioned; elevated prefer session', () => {
   assert.equal(preferredNewJobCwd({
     viewer: { mode: 'multi', workspacePath: '/tmp/user-workspaces/10329667' },
     sessionCwd: 'D:/code/deepseek-harness/clone',
   }), '/tmp/user-workspaces/10329667')
   assert.equal(preferredNewJobCwd({
+    viewer: {
+      mode: 'multi',
+      canViewAll: true,
+      role: 'super_admin',
+      workspacePath: '/tmp/deepseek-harness/10329667',
+    },
+    sessionCwd: 'D:/code/gpt',
+  }), 'D:/code/gpt')
+  assert.equal(preferredNewJobCwd({
     viewer: { mode: 'local', workspacePath: null },
     sessionCwd: '/tmp/ws-app',
   }), '/tmp/ws-app')
   assert.equal(preferredNewJobCwd({}), '')
+})
+
+test('canViewAllJobs treats super_admin role even without permissions flags', () => {
+  assert.equal(canViewAllJobs({ empNo: '10329667', role: 'super_admin', permissions: {} }), true)
+  assert.equal(canViewAllJobs({ empNo: 'tester', role: 'user', permissions: {} }), false)
+  assert.equal(canViewAllJobs({ empNo: 'a', role: 'fallback_admin' }), true)
 })

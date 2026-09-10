@@ -24,6 +24,7 @@ export function localIdentity(overrides?: object): object
 export function claimUnassignedForViewer(state: object, identity: object, deps?: object): { state: object, changed: boolean }
 export function jobVisibleToIdentity(job: object, identity: object): boolean
 export function canViewAllJobs(identity: object): boolean
+export function isElevatedCronRole(role?: string | null): boolean
 export function assertCanAccessJob(job: object, identity: object): object
 export function filterJobsForIdentity(jobs: object[], identity: object): object[]
 export function migrateJobOwners(state: object, deps?: object): { state: object, changed: boolean }

@@ -671,6 +671,75 @@ test('super_admin createJob keeps explicit foreign cwd; normal user is clamped',
   assert.equal(userJob.cwd, '/tmp/user-workspaces/tester')
 })
 
+test('createJob elevates via live resolveIdentityForEmpNo when caller permissions are empty', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    udsAuthOptions: { strictPath: true },
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 's1', status: 'succeeded', summary: 'ok' }
+      },
+      async archiveSession() {},
+    },
+  })
+  // Stale tool identity: empNo only, wrong role flag — must re-resolve from uds-auth.
+  const stale = {
+    empNo: '10329667',
+    role: 'user',
+    displayName: '10329667',
+    permissions: { canViewAllSessions: false },
+    workspacePath: '/tmp/deepseek-harness/10329667',
+  }
+  const job = await service.createJob({
+    name: 'gpt-via-live',
+    prompt: 'work in gpt',
+    cwd: 'D:/code/gpt',
+    schedule: { kind: 'at', at: '2026-08-24T02:00:00.000Z', timezone: 'UTC' },
+  }, stale)
+  assert.equal(job.cwd, 'D:/code/gpt')
+})
+
+test('createJob keeps foreign cwd when only role is stamped super_admin', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    udsAuth: {
+      getProvisionedWorkspacePath(empNo) {
+        return empNo === '10329667'
+          ? '/tmp/deepseek-harness/10329667'
+          : `/tmp/user-workspaces/${empNo}`
+      },
+      isUserPath(empNo, candidatePath) {
+        const root = this.getProvisionedWorkspacePath(empNo)
+        const cand = String(candidatePath || '').replace(/\\/g, '/')
+        const normRoot = String(root).replace(/\\/g, '/')
+        return cand === normRoot || cand.startsWith(`${normRoot}/`)
+      },
+    },
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 's1', status: 'succeeded', summary: 'ok' }
+      },
+    },
+  })
+  const job = await service.createJob({
+    name: 'role-only',
+    prompt: 'p',
+    cwd: 'D:/code/gpt',
+    schedule: { kind: 'at', at: '2026-08-24T02:00:00.000Z', timezone: 'UTC' },
+  }, {
+    empNo: '10329667',
+    role: 'super_admin',
+    permissions: {},
+  })
+  assert.equal(job.cwd, 'D:/code/gpt')
+})
+
 test('live fire uses super_admin job cwd outside provisioned tree', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
