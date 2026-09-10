@@ -15,11 +15,40 @@ import {
   selectJobsByWatch,
 } from '../lib/monitor.js'
 import { createJobRecord, emptyState, listHistoryPage, pruneRuns } from '../lib/store.js'
-import { claimOccurrence, publicJob } from '../lib/fire.js'
+import { claimOccurrence, publicJob, settleRun } from '../lib/fire.js'
 import { createHostService } from '../lib/host.js'
 import { cronToolDefinitions } from '../lib/tools.js'
 
-test('labelsMatch any/all', () => {
+test('settleRun keeps running enter time and stamps exitedAt separately', () => {
+  const now = Date.parse('2026-09-10T07:00:00.000Z')
+  const started = now - 60_000
+  let state = emptyState()
+  const job = createJobRecord({
+    name: 'dur',
+    prompt: 'x',
+    schedule: { kind: 'at', at: new Date(now + 60_000).toISOString(), timezone: 'Asia/Shanghai' },
+  }, state, now)
+  state = { ...state, jobs: [job], runs: [{
+    id: 'r1',
+    jobId: job.id,
+    status: 'running',
+    scheduledAt: started,
+    actualAt: started,
+    stateEnteredAt: started,
+    exitedAt: null,
+    summary: '',
+    error: null,
+    sessionId: 's1',
+  }] }
+  state = settleRun(state, 'r1', { status: 'succeeded', summary: 'ok' }, now)
+  const run = state.runs.find((row) => row.id === 'r1')
+  assert.equal(run.status, 'succeeded')
+  assert.equal(run.stateEnteredAt, started)
+  assert.equal(run.actualAt, started)
+  assert.equal(run.exitedAt, now)
+  assert.ok(run.exitedAt > run.stateEnteredAt)
+})
+
   const job = { role: 'worker', task: 'theory', owner: 'alice' }
   assert.equal(labelsMatch(job, { role: 'worker', task: 'theory' }, 'all'), true)
   assert.equal(labelsMatch(job, { role: 'worker', owner: 'bob' }, 'all'), false)
