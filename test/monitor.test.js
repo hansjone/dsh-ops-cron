@@ -49,6 +49,7 @@ test('settleRun keeps running enter time and stamps exitedAt separately', () => 
   assert.ok(run.exitedAt > run.stateEnteredAt)
 })
 
+test('labelsMatch any/all', () => {
   const job = { role: 'worker', task: 'theory', owner: 'alice' }
   assert.equal(labelsMatch(job, { role: 'worker', task: 'theory' }, 'all'), true)
   assert.equal(labelsMatch(job, { role: 'worker', owner: 'bob' }, 'all'), false)
