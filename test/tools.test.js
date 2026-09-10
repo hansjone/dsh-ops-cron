@@ -453,6 +453,47 @@ test('cron_create from IM peer stamps unassigned owner and forces session cwd', 
   assert.equal(created.job.delivery?.kind, 'im')
 })
 
+test('agentAccess deny is hidden from tools and blocks pause/delete', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tools-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createHostService({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.now(),
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 'tool-sess', status: 'succeeded', summary: 'ok' }
+      },
+    },
+  })
+  const tools = byName(cronToolDefinitions(service))
+  const created = await tools.cron_create.execute({
+    name: 'locked',
+    prompt: 'ping',
+    after_minutes: 30,
+    timezone: 'Asia/Shanghai',
+  }, {})
+  assert.equal(created.job.agentAccess, undefined)
+  assert.equal(created.job.id != null, true)
+
+  await service.updateJob(created.job.id, { agentAccess: 'deny' })
+  const listed = await tools.cron_list.execute({}, {})
+  const row = listed.jobs.find((job) => job.id === created.job.id)
+  assert.ok(row)
+  assert.equal(row.agentAccess, undefined)
+
+  await assert.rejects(
+    () => tools.cron_pause.execute({ id: created.job.id }, {}),
+    (err) => err.code === 'AGENT_ACCESS_DENIED',
+  )
+  await assert.rejects(
+    () => tools.cron_delete.execute({ id: created.job.id }, {}),
+    (err) => err.code === 'AGENT_ACCESS_DENIED',
+  )
+
+  const httpView = await service.getJob(created.job.id)
+  assert.equal(httpView.agentAccess, 'deny')
+})
+
 test('registerCronTools registers each definition and disposer unregisters', () => {
   const registered = []
   const ctx = {
