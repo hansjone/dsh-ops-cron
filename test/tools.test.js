@@ -431,7 +431,16 @@ test('registerCronTools registers each definition and disposer unregisters', () 
     },
   }
   const off = registerCronTools(ctx, {})
-  assert.deepEqual(registered, ['cron_create', 'cron_list', 'cron_pause', 'cron_resume', 'cron_delete'])
+  assert.deepEqual(registered, [
+    'cron_create',
+    'cron_list',
+    'cron_query',
+    'cron_runs',
+    'cron_progress',
+    'cron_pause',
+    'cron_resume',
+    'cron_delete',
+  ])
   off()
   assert.deepEqual(registered, [])
 })
@@ -440,6 +449,9 @@ test('cron tool output schemas never use type arrays (Host rejects them)', () =>
   const defs = cronToolDefinitions({
     async createJob() { return {} },
     async listJobs() { return [] },
+    async queryJobs() { return { jobs: [], items: [], count: 0 } },
+    async listRuns() { return { task_id: '', runs: [], next_cursor: null, total: 0 } },
+    async getProgress() { return { snapshots: [], count: 0 } },
     async pauseJob() { return {} },
     async resumeJob() { return {} },
     async deleteJob() { return {} },
