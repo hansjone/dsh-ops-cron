@@ -718,6 +718,74 @@ test('one-shot at job fires once then later ticks wait instead of retriggering',
   assert.equal(misfires.length, 0)
 })
 
+test('recover re-arms past-due oneshot instead of clearing nextRunAt', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const at = Date.parse('2026-09-11T00:00:00.000Z')
+  let clock = at - 30_000
+  let sessions = 0
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => clock,
+    sessionPort: {
+      async createAndPrompt() {
+        sessions += 1
+        return { sessionId: `catchup-${sessions}`, status: 'succeeded', summary: 'catch-up' }
+      },
+    },
+  })
+  const job = await service.createJob({
+    name: 'catchup-at',
+    prompt: 'ping',
+    schedule: { kind: 'at', at: new Date(at).toISOString(), timezone: 'UTC' },
+  })
+  assert.equal(job.nextRunAt, at)
+
+  // Simulate Host restart after the due time (previously wiped nextRunAt via nextFire→null).
+  clock = at + 90_000
+  await service.recover()
+  const after = await service.getJob(job.id)
+  assert.equal(after.nextRunAt, clock)
+
+  const fired = await service.tick()
+  assert.equal(fired.length, 1)
+  assert.equal(fired[0].run.status, 'succeeded')
+  assert.equal(sessions, 1)
+})
+
+test('tick evaluates misfire against tick-start time so a slow prior job cannot age out oneshots', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const due = Date.parse('2026-09-11T01:00:00.000Z')
+  let clock = due
+  let sessions = 0
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => clock,
+    sessionPort: {
+      async createAndPrompt({ job }) {
+        sessions += 1
+        // First job stretches wall clock past oneshot grace (60s).
+        if (job.name === 'slow') clock = due + 90_000
+        return { sessionId: `s-${sessions}`, status: 'succeeded', summary: 'ok' }
+      },
+    },
+  })
+  await service.createJob({
+    name: 'slow',
+    prompt: 'first',
+    schedule: { kind: 'at', at: new Date(due).toISOString(), timezone: 'UTC' },
+  })
+  await service.createJob({
+    name: 'peer',
+    prompt: 'second',
+    schedule: { kind: 'at', at: new Date(due).toISOString(), timezone: 'UTC' },
+  })
+  const fired = await service.tick()
+  assert.equal(fired.filter((row) => row.run?.status === 'succeeded').length, 2)
+  assert.equal(sessions, 2)
+})
+
 test('unarchiveSession drops the id from archivedSessionIds', async () => {
   const state = { workspaceIds: ['w'], archivedSessionIds: ['s1', 's2'], initialized: true }
   const ctx = {
