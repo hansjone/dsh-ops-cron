@@ -35,7 +35,16 @@ test('isRetriggerable / publicJob.retriggerable for consumed oneshots', () => {
   assert.equal(isRetriggerable(base, []), true)
   assert.equal(publicJob(base, []).retriggerable, true)
 
-  assert.equal(isRetriggerable({ ...base, schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' } }, []), false)
+  const cron = {
+    ...base,
+    schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' },
+    nextRunAt: now + 60_000,
+    lastStatus: null,
+  }
+  assert.equal(isRetriggerable(cron, []), true)
+  assert.equal(publicJob(cron, []).retriggerable, true)
+  assert.equal(isRetriggerable(cron, [{ id: 'r1', jobId: 'j1', status: 'running' }]), false)
+
   assert.equal(isRetriggerable({ ...base, nextRunAt: now + 60_000 }, []), false)
   assert.equal(isRetriggerable({ ...base, lastStatus: null }, []), false)
   assert.equal(isRetriggerable(base, [{ id: 'r1', jobId: 'j1', status: 'running' }]), false)

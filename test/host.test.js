@@ -285,7 +285,7 @@ test('overlap skip writes a skipped history row instead of a second session', as
   assert.equal(inflight, 1)
 })
 
-test('retriggerJob re-fires consumed oneshot; rejects cron / pending / in-flight', async (t) => {
+test('retriggerJob fires recurring immediately and re-arms consumed oneshot', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   let clock = Date.parse('2026-09-10T08:00:00.000Z')
@@ -307,7 +307,17 @@ test('retriggerJob re-fires consumed oneshot; rejects cron / pending / in-flight
     prompt: 'loop',
     schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' },
   })
-  await assert.rejects(() => service.retriggerJob(cron.id), (err) => err.code === 'INVALID_RETRIGGER')
+  const cronNext = cron.nextRunAt
+  assert.equal(cron.retriggerable, true)
+  await assert.rejects(
+    () => service.retriggerJob(cron.id, { after_minutes: 5 }),
+    (err) => err.code === 'INVALID_RETRIGGER',
+  )
+  const cronHit = await service.retriggerJob(cron.id)
+  assert.equal(cronHit.mode, 'immediate')
+  assert.equal(cronHit.run.status, 'succeeded')
+  assert.equal(cronHit.job.nextRunAt, cronNext)
+  assert.equal(fires, 1)
 
   const waiting = await service.createJob({
     name: 'waiting',
@@ -359,7 +369,7 @@ test('retriggerJob re-fires consumed oneshot; rejects cron / pending / in-flight
   assert.equal(again.mode, 'immediate')
   assert.ok(again.run)
   assert.equal(again.run.status, 'succeeded')
-  assert.equal(fires, 2)
+  assert.equal(fires, 3)
 
   // In-flight reject
   await service.store.mutate((state) => ({
