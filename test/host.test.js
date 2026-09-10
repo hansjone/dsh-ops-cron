@@ -285,6 +285,119 @@ test('overlap skip writes a skipped history row instead of a second session', as
   assert.equal(inflight, 1)
 })
 
+test('retriggerJob re-fires consumed oneshot; rejects cron / pending / in-flight', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  let clock = Date.parse('2026-09-10T08:00:00.000Z')
+  let fires = 0
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => clock,
+    sessionPort: {
+      async createAndPrompt() {
+        fires += 1
+        return { sessionId: `s-${fires}`, status: 'succeeded', summary: `ok-${fires}` }
+      },
+      async archiveSession() {},
+    },
+  })
+
+  const cron = await service.createJob({
+    name: 'cron-job',
+    prompt: 'loop',
+    schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' },
+  })
+  await assert.rejects(() => service.retriggerJob(cron.id), (err) => err.code === 'INVALID_RETRIGGER')
+
+  const waiting = await service.createJob({
+    name: 'waiting',
+    prompt: 'soon',
+    schedule: { kind: 'at', at: new Date(clock + 3600_000).toISOString(), timezone: 'UTC' },
+  })
+  await assert.rejects(() => service.retriggerJob(waiting.id), (err) => err.code === 'INVALID_RETRIGGER')
+
+  const worker = await service.createJob({
+    name: 'worker',
+    prompt: 'continue',
+    enabled: false,
+    cwd: '/tmp/user-workspaces/tester',
+    schedule: { kind: 'at', at: new Date(clock + 60_000).toISOString(), timezone: 'UTC' },
+  }, { empNo: 'tester', displayName: 'Tester', permissions: { canViewAllSessions: false } })
+  // Force consume: run-now while enabling via update, then clear next by settling through schedule fire path.
+  await service.pauseJob(worker.id, true)
+  const first = await service.dispatchRun(worker.id, 'run-now')
+  assert.equal(first.run.status, 'succeeded')
+  // Manually mark as consumed oneshot (run-now keeps nextRunAt).
+  await service.store.mutate((state) => {
+    const job = state.jobs.find((row) => row.id === worker.id)
+    return {
+      ...state,
+      jobs: state.jobs.map((row) => (row.id === worker.id
+        ? { ...job, nextRunAt: null, lastStatus: 'succeeded', enabled: false }
+        : row)),
+    }
+  })
+  const listed = await service.listJobs()
+  const view = listed.find((row) => row.id === worker.id)
+  assert.equal(view.retriggerable, true)
+  assert.equal(view.enabled, false)
+
+  const delayed = await service.retriggerJob(worker.id, { after_minutes: 5 })
+  assert.equal(delayed.mode, 'scheduled')
+  assert.equal(delayed.job.enabled, true)
+  assert.ok(delayed.nextRunAt > clock)
+  assert.equal(delayed.job.retriggerable, false)
+
+  // Consume again then immediate retrigger.
+  await service.store.mutate((state) => ({
+    ...state,
+    jobs: state.jobs.map((row) => (row.id === worker.id
+      ? { ...row, nextRunAt: null, lastStatus: 'succeeded' }
+      : row)),
+  }))
+  const again = await service.retriggerJob(worker.id)
+  assert.equal(again.mode, 'immediate')
+  assert.ok(again.run)
+  assert.equal(again.run.status, 'succeeded')
+  assert.equal(fires, 2)
+
+  // In-flight reject
+  await service.store.mutate((state) => ({
+    ...state,
+    jobs: state.jobs.map((row) => (row.id === worker.id
+      ? { ...row, nextRunAt: null, lastStatus: 'succeeded' }
+      : row)),
+    runs: [
+      {
+        id: 'inflight',
+        jobId: worker.id,
+        status: 'running',
+        scheduledAt: clock,
+        actualAt: clock,
+        stateEnteredAt: clock,
+      },
+      ...(state.runs || []),
+    ],
+  }))
+  await assert.rejects(() => service.retriggerJob(worker.id), (err) => err.code === 'ALREADY_RUNNING')
+
+  const http = await listen(service)
+  t.after(() => http.close())
+  await service.store.mutate((state) => ({
+    ...state,
+    runs: (state.runs || []).filter((run) => run.id !== 'inflight'),
+    jobs: state.jobs.map((row) => (row.id === worker.id
+      ? { ...row, nextRunAt: null, lastStatus: 'succeeded', enabled: true }
+      : row)),
+  }))
+  const httpHit = await jsonRequest(http.url, `/dsh-ops-cron/jobs/${worker.id}/retrigger`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+  assert.equal(httpHit.status, 200)
+  assert.equal(httpHit.body.mode, 'immediate')
+  assert.ok(httpHit.body.run?.id)
+})
 
 test('http api: anonymous list/run-now is rejected', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))

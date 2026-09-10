@@ -439,6 +439,7 @@ test('registerCronTools registers each definition and disposer unregisters', () 
     'cron_progress',
     'cron_pause',
     'cron_resume',
+    'cron_retrigger',
     'cron_delete',
   ])
   off()
@@ -454,6 +455,7 @@ test('cron tool output schemas never use type arrays (Host rejects them)', () =>
     async getProgress() { return { snapshots: [], count: 0 } },
     async pauseJob() { return {} },
     async resumeJob() { return {} },
+    async retriggerJob() { return {} },
     async deleteJob() { return {} },
   })
   const bad = []

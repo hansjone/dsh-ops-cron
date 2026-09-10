@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
+  isRetriggerable,
   labelsMatch,
   normalizeLabels,
   normalizePersistHistory,
@@ -18,6 +19,27 @@ import { createJobRecord, emptyState, listHistoryPage, pruneRuns } from '../lib/
 import { claimOccurrence, publicJob, settleRun } from '../lib/fire.js'
 import { createHostService } from '../lib/host.js'
 import { cronToolDefinitions } from '../lib/tools.js'
+
+test('isRetriggerable / publicJob.retriggerable for consumed oneshots', () => {
+  const now = Date.parse('2026-09-10T08:00:00.000Z')
+  const base = {
+    id: 'j1',
+    name: 'worker',
+    enabled: true,
+    schedule: { kind: 'at', at: new Date(now - 60_000).toISOString(), timezone: 'UTC' },
+    nextRunAt: null,
+    lastStatus: 'succeeded',
+    lastRunAt: now - 30_000,
+    timeoutMinutes: 10,
+  }
+  assert.equal(isRetriggerable(base, []), true)
+  assert.equal(publicJob(base, []).retriggerable, true)
+
+  assert.equal(isRetriggerable({ ...base, schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' } }, []), false)
+  assert.equal(isRetriggerable({ ...base, nextRunAt: now + 60_000 }, []), false)
+  assert.equal(isRetriggerable({ ...base, lastStatus: null }, []), false)
+  assert.equal(isRetriggerable(base, [{ id: 'r1', jobId: 'j1', status: 'running' }]), false)
+})
 
 test('settleRun keeps running enter time and stamps exitedAt separately', () => {
   const now = Date.parse('2026-09-10T07:00:00.000Z')
