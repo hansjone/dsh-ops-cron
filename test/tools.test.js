@@ -116,6 +116,42 @@ test('resolveCreateCwd prefers explicit cwd then the calling session', () => {
   })
 })
 
+test('resolveCreateModel / normalizeJobModel split doubled provider/model routes', async (t) => {
+  const { normalizeJobModel, splitProviderModel } = await import('../lib/store.js')
+  assert.deepEqual(
+    splitProviderModel('zte/Qwen3-235B-A22B', 'zte/Qwen3-235B-A22B'),
+    { provider: 'zte', model: 'Qwen3-235B-A22B' },
+  )
+  assert.deepEqual(
+    splitProviderModel('zte', 'zte/Qwen3-235B-A22B'),
+    { provider: 'zte', model: 'Qwen3-235B-A22B' },
+  )
+  assert.deepEqual(
+    splitProviderModel('', 'zte/Qwen3-235B-A22B'),
+    { provider: 'zte', model: 'Qwen3-235B-A22B' },
+  )
+  // Legitimate model id with slash under a distinct provider stays intact.
+  assert.deepEqual(
+    splitProviderModel('openai', 'org/custom-model'),
+    { provider: 'openai', model: 'org/custom-model' },
+  )
+  assert.deepEqual(
+    normalizeJobModel({ provider: 'zte/Qwen3-235B-A22B', model: 'zte/Qwen3-235B-A22B' }),
+    { provider: 'zte', model: 'Qwen3-235B-A22B', reasoningEffort: '' },
+  )
+  assert.deepEqual(
+    resolveCreateModel(
+      { provider: 'zte/Qwen3-235B-A22B', model: 'zte/Qwen3-235B-A22B' },
+      { agent: { options: { provider: 'other', model: 'other-model' } } },
+    ),
+    { provider: 'zte', model: 'Qwen3-235B-A22B', reasoningEffort: '' },
+  )
+  assert.deepEqual(
+    resolveCreateModel({}, { agent: { options: { provider: 'zte/Qwen3-235B-A22B', model: 'zte/Qwen3-235B-A22B' } } }),
+    { provider: 'zte', model: 'Qwen3-235B-A22B', reasoningEffort: '' },
+  )
+})
+
 test('cron_create hour+minute uses today and rejects a guessed past calendar date', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tools-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
