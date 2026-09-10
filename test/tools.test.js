@@ -435,3 +435,25 @@ test('registerCronTools registers each definition and disposer unregisters', () 
   off()
   assert.deepEqual(registered, [])
 })
+
+test('cron tool output schemas never use type arrays (Host rejects them)', () => {
+  const defs = cronToolDefinitions({
+    async createJob() { return {} },
+    async listJobs() { return [] },
+    async pauseJob() { return {} },
+    async resumeJob() { return {} },
+    async deleteJob() { return {} },
+  })
+  const bad = []
+  function walk(node, path) {
+    if (!node || typeof node !== 'object') return
+    if (Array.isArray(node.type)) bad.push(`${path}.type=${JSON.stringify(node.type)}`)
+    if (Array.isArray(node.oneOf)) node.oneOf.forEach((branch, i) => walk(branch, `${path}.oneOf[${i}]`))
+    if (node.properties && typeof node.properties === 'object') {
+      for (const [key, child] of Object.entries(node.properties)) walk(child, `${path}.properties.${key}`)
+    }
+    if (node.items) walk(node.items, `${path}.items`)
+  }
+  for (const def of defs) walk(def.output?.schema, def.name)
+  assert.deepEqual(bad, [])
+})
