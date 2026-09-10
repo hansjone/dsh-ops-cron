@@ -260,6 +260,163 @@ test('cron_create stamps ownerEmpNo from user-workspaces cwd', async (t) => {
   assert.equal(listed.jobs[0].id, created.job.id)
 })
 
+test('resolveToolIdentity restores super_admin permissions via udsAuth', () => {
+  const uds = {
+    getSessionOwner(sessionId) {
+      return sessionId === 'sess-super' ? '10329667' : null
+    },
+    resolveIdentityForEmpNo(empNo) {
+      if (empNo !== '10329667') return null
+      return {
+        empNo: '10329667',
+        role: 'super_admin',
+        displayName: 'Super',
+        permissions: { canViewAllSessions: true, canCreateWorkspace: true },
+        workspacePath: '/tmp/deepseek-harness/10329667',
+      }
+    },
+    getProvisionedWorkspacePath(empNo) {
+      return `/tmp/deepseek-harness/${empNo}`
+    },
+  }
+  const identity = resolveToolIdentity(
+    { agent: { session: { id: 'sess-super', header: { cwd: 'D:/code/gpt' } } } },
+    { getUdsAuth: () => uds },
+  )
+  assert.equal(identity.empNo, '10329667')
+  assert.equal(identity.role, 'super_admin')
+  assert.equal(identity.permissions.canViewAllSessions, true)
+})
+
+test('cron_create keeps foreign cwd for super_admin tool identity', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tools-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const owners = new Map([['sess-super', '10329667']])
+  const uds = {
+    getSessionOwner(id) { return owners.get(id) || null },
+    resolveIdentityForEmpNo(empNo) {
+      if (empNo !== '10329667') {
+        return {
+          empNo,
+          role: 'user',
+          permissions: { canViewAllSessions: false },
+          workspacePath: `/tmp/user-workspaces/${empNo}`,
+        }
+      }
+      return {
+        empNo: '10329667',
+        role: 'super_admin',
+        permissions: { canViewAllSessions: true, canCreateWorkspace: true },
+        workspacePath: '/tmp/deepseek-harness/10329667',
+      }
+    },
+    getProvisionedWorkspacePath(empNo) {
+      return empNo === '10329667'
+        ? '/tmp/deepseek-harness/10329667'
+        : `/tmp/user-workspaces/${empNo}`
+    },
+    isUserPath(empNo, candidatePath) {
+      const root = this.getProvisionedWorkspacePath(empNo)
+      const cand = String(candidatePath || '').replace(/\\/g, '/')
+      const normRoot = String(root).replace(/\\/g, '/')
+      return cand === normRoot || cand.startsWith(`${normRoot}/`)
+    },
+  }
+  const service = createHostService({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    getUdsAuth: () => uds,
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 'tool-sess', status: 'succeeded', summary: 'ok' }
+      },
+    },
+  })
+  const tools = byName(cronToolDefinitions(service))
+  const exec = {
+    agent: {
+      session: {
+        id: 'sess-super',
+        header: { cwd: '/tmp/deepseek-harness/10329667' },
+      },
+    },
+  }
+  const created = await tools.cron_create.execute({
+    name: 'gpt-cron',
+    prompt: 'continue BGP',
+    after_minutes: 1,
+    timezone: 'Asia/Shanghai',
+    cwd: 'D:/code/gpt',
+  }, exec)
+  assert.equal(created.job.cwd, 'D:/code/gpt')
+  assert.equal(created.job.ownerEmpNo, '10329667')
+})
+
+test('cron_create from IM peer stamps unassigned owner and forces session cwd', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cron-tools-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const peer = {
+    botId: 'bot-a',
+    conversationKey: 'direct:86138@s.whatsapp.net',
+    conversationId: '86138@s.whatsapp.net',
+    kind: 'direct',
+    phone: '86138',
+  }
+  const dshIm = {
+    resolveSessionPeer: async () => peer,
+    listTargets: async () => [{
+      targetId: 'auto-dm-86138',
+      kind: 'user',
+      route: { jid: '86138@s.whatsapp.net' },
+    }],
+  }
+  const uds = {
+    getSessionOwner() { return '10329667' },
+    resolveIdentityForEmpNo(empNo) {
+      return {
+        empNo,
+        role: 'super_admin',
+        permissions: { canViewAllSessions: true, canCreateWorkspace: true },
+        workspacePath: '/tmp/deepseek-harness/10329667',
+      }
+    },
+    getProvisionedWorkspacePath(empNo) {
+      return `/tmp/deepseek-harness/${empNo}`
+    },
+    isUserPath() { return false },
+  }
+  const service = createHostService({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    getUdsAuth: () => uds,
+    getDshIm: () => dshIm,
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 'tool-sess', status: 'succeeded', summary: 'ok' }
+      },
+    },
+  })
+  const tools = byName(cronToolDefinitions(service, { getDshIm: () => dshIm }))
+  const created = await tools.cron_create.execute({
+    name: 'im-cron',
+    prompt: 'channel work',
+    after_minutes: 2,
+    timezone: 'Asia/Shanghai',
+    cwd: 'D:/code/gpt',
+  }, {
+    agent: {
+      session: {
+        id: 'sess-im',
+        header: { cwd: '/data/bot-ws/wa' },
+      },
+    },
+  })
+  assert.equal(created.job.ownerEmpNo, '__unassigned__')
+  assert.equal(created.job.cwd, '/data/bot-ws/wa')
+  assert.equal(created.job.origin?.kind, 'im')
+  assert.equal(created.job.delivery?.kind, 'im')
+})
+
 test('registerCronTools registers each definition and disposer unregisters', () => {
   const registered = []
   const ctx = {

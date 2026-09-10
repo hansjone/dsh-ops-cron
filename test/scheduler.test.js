@@ -139,3 +139,24 @@ test('one-shot at fires once then waits as complete even if nextRunAt is null', 
   assert.equal(second.action, 'wait')
   assert.equal(second.reason, 'complete')
 })
+
+test('one-shot misfire beyond grace skips and clears nextRunAt', () => {
+  const at = shanghai(2026, 8, 23, 22, 57)
+  const job = {
+    id: 'at-miss',
+    enabled: true,
+    schedule: { kind: 'at', at: new Date(at).toISOString(), timezone: TZ },
+    nextRunAt: at,
+    createdAt: at - 60_000,
+  }
+  const decision = decideDispatch({
+    job,
+    runs: [],
+    now: at + 5 * 60_000,
+    misfirePolicy: 'skip',
+    graceMs: 60_000,
+  })
+  assert.equal(decision.action, 'skip')
+  assert.equal(decision.reason, 'misfire')
+  assert.equal(decision.nextRunAt, null)
+})

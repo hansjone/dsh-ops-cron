@@ -16,6 +16,7 @@ export function apply(ctx: Context, config?: Config): void
 export function createHostService(options?: object): object
 export function makeLiveSessionPort(ctx: object): object
 export function resolveSessionPlacement(ctx: object, job?: object, deps?: object): { cwd: string, workspace: object | null }
+export function ownerAllowsForeignCwd(ownerEmpNo: string, uds?: object | null): boolean
 export const UNASSIGNED_OWNER: '__unassigned__'
 export const LOCAL_EMP_NO: '__local__'
 export function isMultiUserIdentity(identity: object | null | undefined): boolean
@@ -27,6 +28,7 @@ export function assertCanAccessJob(job: object, identity: object): object
 export function filterJobsForIdentity(jobs: object[], identity: object): object[]
 export function migrateJobOwners(state: object, deps?: object): { state: object, changed: boolean }
 export function viewerPayload(identity: object | null): object | null
+export function preferredNewJobCwd(input?: { viewer?: object | null, sessionCwd?: string }): string
 export function listWorkspaceChoices(ctx: object): Array<{ id: string, title: string, path: string }>
 export function listModelChoices(ctx: object): Promise<{ groups: Array<{ provider: string, displayName: string, models: Array<{ id: string, name: string }> }>, current: { provider: string, model: string, reasoningEffort?: string } | null }>
 export function resolveJobModel(ctx: object, job?: object): Promise<{ provider: string, model: string, reasoningEffort?: string }>
@@ -35,6 +37,7 @@ export function normalizeJobModel(input?: object): { provider: string, model: st
 export function callerWorkingDirectory(exec?: object): string
 export function resolveCreateCwd(args?: object, exec?: object): string
 export function resolveCreateModel(args?: object, exec?: object): { provider: string, model: string, reasoningEffort: string }
+export function resolveToolIdentity(exec?: object, service?: object): object | null
 export function callerModelSelection(exec?: object): { provider: string, model: string, reasoningEffort: string }
 export function scheduleFromArgs(args?: object, nowMs?: number): { kind: string, at?: string, expr?: string, timezone: string }
 export function adoptSessionIntoWorkspace(ctx: object, sessionId: string): Promise<{ ok: boolean, attached: boolean, sessionId?: string, cwd?: string | null, workspaceId?: string | null }>

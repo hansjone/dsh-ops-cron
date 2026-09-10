@@ -11,6 +11,7 @@ import {
   deliverRunToIm,
   mirrorRunToSession,
   jobVisibleToPeer,
+  assertDeliveryAllowedForIdentity,
 } from '../lib/delivery.js'
 
 test('normalizeDelivery defaults to dsh', () => {
@@ -438,4 +439,18 @@ test('formatRunResultBody matches IM delivery header', () => {
   assert.match(body, /ok$/)
   const en = formatRunResultBody({ name: 'Daily' }, 'ok', 'en')
   assert.match(en, /^\[Scheduled tasks · Daily\]\n/)
+})
+
+test('assertDeliveryAllowedForIdentity blocks non-admin web IM delivery', () => {
+  const im = { kind: 'im', botId: 'b', targetId: 't' }
+  assert.equal(
+    assertDeliveryAllowedForIdentity(im, { empNo: 'a1', permissions: { canViewAllSessions: true } }),
+    im,
+  )
+  assert.doesNotThrow(() => assertDeliveryAllowedForIdentity(im, { empNo: '__local__', permissions: { canViewAllSessions: true } }))
+  assert.throws(
+    () => assertDeliveryAllowedForIdentity(im, { empNo: 'u1', permissions: { canViewAllSessions: false } }),
+    (error) => error.code === 'IM_DELIVERY_FORBIDDEN',
+  )
+  assert.doesNotThrow(() => assertDeliveryAllowedForIdentity({ kind: 'dsh' }, { empNo: 'u1', permissions: {} }))
 })

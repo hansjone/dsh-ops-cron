@@ -14,6 +14,7 @@ import {
   migrateJobOwners,
   UNASSIGNED_OWNER,
   viewerPayload,
+  preferredNewJobCwd,
 } from '../lib/ownership.js'
 
 test('jobVisibleToIdentity respects canViewAll and owner', () => {
@@ -122,4 +123,16 @@ test('claimUnassignedForViewer claims by session owner or user-workspaces cwd', 
   assert.equal(next.jobs[4].ownerEmpNo, UNASSIGNED_OWNER)
   // Unknown session owner: leave unassigned for admin-only visibility.
   assert.equal(next.jobs[5].ownerEmpNo, UNASSIGNED_OWNER)
+})
+
+test('preferredNewJobCwd prefers provisioned viewer workspace over session cwd', () => {
+  assert.equal(preferredNewJobCwd({
+    viewer: { mode: 'multi', workspacePath: '/tmp/user-workspaces/10329667' },
+    sessionCwd: 'D:/code/deepseek-harness/clone',
+  }), '/tmp/user-workspaces/10329667')
+  assert.equal(preferredNewJobCwd({
+    viewer: { mode: 'local', workspacePath: null },
+    sessionCwd: '/tmp/ws-app',
+  }), '/tmp/ws-app')
+  assert.equal(preferredNewJobCwd({}), '')
 })

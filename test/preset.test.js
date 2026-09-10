@@ -40,6 +40,26 @@ test('createJobRecord defaults mirrorToSession off and accepts explicit true', (
   )
 })
 
+test('createJobRecord fires ASAP when one-shot at is slightly in the past', () => {
+  const now = Date.parse('2026-08-24T01:00:30.000Z')
+  const at = new Date(now - 15_000).toISOString()
+  const job = createJobRecord({
+    name: 'soon',
+    prompt: 'ping',
+    schedule: { kind: 'at', at, timezone: 'UTC' },
+  }, emptyState(), now)
+  assert.equal(job.nextRunAt, now)
+
+  assert.throws(
+    () => createJobRecord({
+      name: 'late',
+      prompt: 'ping',
+      schedule: { kind: 'at', at: new Date(now - 120_000).toISOString(), timezone: 'UTC' },
+    }, emptyState(), now),
+    (error) => error.code === 'INVALID_AT',
+  )
+})
+
 test('resolveCreateAgentPreset prefers explicit then peer then session then host default', async () => {
   assert.equal(
     await resolveCreateAgentPreset({ agent_preset: 'explicit' }, {}, {}),

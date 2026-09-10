@@ -100,6 +100,7 @@ function mockUdsAuth(options = {}) {
     tester: { role: 'user', canViewAll: false, path: '/tmp/user-workspaces/tester', displayName: 'Tester' },
     peer: { role: 'user', canViewAll: false, path: '/tmp/user-workspaces/peer', displayName: 'Peer' },
     admin1: { role: 'super_admin', canViewAll: true, path: '/tmp/user-workspaces/admin1', displayName: 'Admin' },
+    '10329667': { role: 'super_admin', canViewAll: true, path: '/tmp/deepseek-harness/10329667', displayName: 'Super' },
     administrator: { role: 'fallback_admin', canViewAll: true, path: '/tmp/user-workspaces/administrator', displayName: 'Fallback' },
     ...(options.users || {}),
   }
@@ -119,7 +120,30 @@ function mockUdsAuth(options = {}) {
         empNo,
         role: row.role,
         displayName: row.displayName || empNo,
-        permissions: { canViewAllSessions: !!row.canViewAll },
+        permissions: {
+          canViewAllSessions: !!row.canViewAll,
+          canCreateWorkspace: !!row.canViewAll,
+        },
+        workspacePath: row.path,
+      }
+    },
+    resolveIdentityForEmpNo(empNo) {
+      const id = String(empNo || '').trim()
+      if (!id || id.startsWith('__')) return null
+      const row = users[id] || {
+        role: 'user',
+        canViewAll: false,
+        path: `/tmp/user-workspaces/${id}`,
+        displayName: id,
+      }
+      return {
+        empNo: id,
+        role: row.role,
+        displayName: row.displayName || id,
+        permissions: {
+          canViewAllSessions: !!row.canViewAll,
+          canCreateWorkspace: !!row.canViewAll,
+        },
         workspacePath: row.path,
       }
     },
@@ -133,8 +157,9 @@ function mockUdsAuth(options = {}) {
       if (!candidatePath) return false
       if (options.strictPath) {
         const root = this.getProvisionedWorkspacePath(empNo)
-        const cand = String(candidatePath)
-        return cand === root || cand.startsWith(`${root}/`) || cand.startsWith(`${root}\\`)
+        const cand = String(candidatePath).replace(/\\/g, '/')
+        const normRoot = String(root).replace(/\\/g, '/')
+        return cand === normRoot || cand.startsWith(`${normRoot}/`)
       }
       return true
     },
@@ -560,6 +585,243 @@ test('resolveSessionPlacement uses recent workspace path when job cwd is empty',
   const explicit = resolveSessionPlacement(ctx, { cwd: '/tmp/isolated' })
   assert.equal(explicit.cwd, '/tmp/isolated')
   assert.equal(explicit.workspace, null)
+})
+
+test('resolveSessionPlacement keeps foreign cwd for super_admin owner under strict path ACL', () => {
+  const recent = { id: 'ws-recent', path: '/tmp/ws-app', async attachSession() {} }
+  const ctx = {
+    get(name) {
+      if (name === 'workspaceRegistry') return { list: () => [recent] }
+      return undefined
+    },
+  }
+  const uds = mockUdsAuth({ strictPath: true })
+  const kept = resolveSessionPlacement(ctx, {
+    cwd: 'D:/code/gpt',
+    ownerEmpNo: '10329667',
+  }, { udsAuth: uds })
+  assert.equal(kept.cwd, 'D:/code/gpt')
+
+  const clamped = resolveSessionPlacement(ctx, {
+    cwd: 'D:/code/gpt',
+    ownerEmpNo: 'tester',
+  }, { udsAuth: uds })
+  assert.equal(clamped.cwd, '/tmp/user-workspaces/tester')
+})
+
+test('resolveSessionPlacement prefers owner provisioned path over recent workspace when cwd empty', () => {
+  const recent = { id: 'ws-recent', path: '/tmp/wrong-recent', async attachSession() {} }
+  const ctx = {
+    get(name) {
+      if (name === 'workspaceRegistry') return { list: () => [recent] }
+      return undefined
+    },
+  }
+  const uds = mockUdsAuth({ strictPath: true })
+  const placed = resolveSessionPlacement(ctx, {
+    cwd: '',
+    ownerEmpNo: '10329667',
+  }, { udsAuth: uds })
+  assert.equal(placed.cwd, '/tmp/deepseek-harness/10329667')
+})
+
+test('super_admin createJob keeps explicit foreign cwd; normal user is clamped', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    udsAuthOptions: { strictPath: true },
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 's1', status: 'succeeded', summary: 'ok' }
+      },
+      async archiveSession() {},
+    },
+  })
+  const superId = {
+    empNo: '10329667',
+    role: 'super_admin',
+    displayName: 'Super',
+    permissions: { canViewAllSessions: true, canCreateWorkspace: true },
+    workspacePath: '/tmp/deepseek-harness/10329667',
+  }
+  const superJob = await service.createJob({
+    name: 'gpt-job',
+    prompt: 'work in gpt',
+    cwd: 'D:/code/gpt',
+    schedule: { kind: 'cron', expr: '0 2 * * *', timezone: 'Asia/Shanghai' },
+  }, superId)
+  assert.equal(superJob.cwd, 'D:/code/gpt')
+  assert.equal(superJob.ownerEmpNo, '10329667')
+
+  const userId = {
+    empNo: 'tester',
+    role: 'user',
+    displayName: 'Tester',
+    permissions: { canViewAllSessions: false },
+    workspacePath: '/tmp/user-workspaces/tester',
+  }
+  const userJob = await service.createJob({
+    name: 'user-job',
+    prompt: 'try foreign',
+    cwd: 'D:/code/gpt',
+    schedule: { kind: 'cron', expr: '0 3 * * *', timezone: 'Asia/Shanghai' },
+  }, userId)
+  assert.equal(userJob.cwd, '/tmp/user-workspaces/tester')
+})
+
+test('live fire uses super_admin job cwd outside provisioned tree', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const seen = []
+  const uds = mockUdsAuth({ strictPath: true })
+  const service = createHostService({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    getUdsAuth: () => uds,
+    sessionPort: {
+      async createAndPrompt({ job }) {
+        const placement = resolveSessionPlacement({
+          get() { return { list: () => [] } },
+        }, job, { udsAuth: uds })
+        seen.push(placement.cwd)
+        return { sessionId: `run-${seen.length}`, status: 'succeeded', summary: 'ok' }
+      },
+      async archiveSession() {},
+    },
+  })
+  const job = await service.createJob({
+    name: 'fire-gpt',
+    prompt: 'ping',
+    cwd: 'D:/code/gpt',
+    schedule: { kind: 'at', at: '2099-01-01T00:00:00.000Z', timezone: 'UTC' },
+  }, {
+    empNo: '10329667',
+    role: 'super_admin',
+    permissions: { canViewAllSessions: true, canCreateWorkspace: true },
+  })
+  assert.equal(job.cwd, 'D:/code/gpt')
+  await service.dispatchRun(job.id, 'run-now')
+  assert.deepEqual(seen, ['D:/code/gpt'])
+})
+
+test('IM peer create keeps bot cwd unassigned and rejects empty cwd', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    udsAuthOptions: { strictPath: true },
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 's-im', status: 'succeeded', summary: 'ok' }
+      },
+      async archiveSession() {},
+    },
+  })
+  const job = await service.createJob({
+    name: 'im-job',
+    prompt: 'from channel',
+    cwd: '/data/bot-workspace/wa',
+    delivery: { kind: 'im', botId: 'bot-a', targetId: 'auto-dm' },
+    origin: {
+      kind: 'im',
+      sessionId: 'sess-im',
+      peer: { botId: 'bot-a', conversationKey: 'direct:1@s.whatsapp.net', conversationId: '1@s.whatsapp.net' },
+    },
+    schedule: { kind: 'at', at: '2099-01-01T00:00:00.000Z', timezone: 'UTC' },
+  }, {
+    empNo: '10329667',
+    permissions: { canViewAllSessions: true },
+  }, { fromImPeer: true })
+  assert.equal(job.ownerEmpNo, '__unassigned__')
+  assert.equal(job.cwd, '/data/bot-workspace/wa')
+  assert.equal(job.origin.kind, 'im')
+
+  await assert.rejects(
+    () => service.createJob({
+      name: 'im-empty',
+      prompt: 'x',
+      cwd: '',
+      origin: {
+        kind: 'im',
+        sessionId: 'sess-im',
+        peer: { botId: 'bot-a', conversationKey: 'direct:1@s.whatsapp.net' },
+      },
+      schedule: { kind: 'at', at: '2099-01-01T00:00:00.000Z', timezone: 'UTC' },
+    }, null, { fromImPeer: true }),
+    (error) => error.code === 'INVALID_CWD',
+  )
+})
+
+test('HTTP web create strips forged IM origin and rejects IM delivery for normal users', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 's', status: 'succeeded', summary: 'ok' }
+      },
+      async archiveSession() {},
+    },
+  })
+  const { url, close } = await listen(service)
+  t.after(close)
+
+  const forged = await jsonRequest(url, '/dsh-ops-cron/jobs', {
+    empNo: 'tester',
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'forge',
+      prompt: 'x',
+      schedule: { kind: 'at', at: '2099-01-01T00:00:00.000Z', timezone: 'UTC' },
+      cwd: '/tmp/user-workspaces/tester',
+      origin: {
+        kind: 'im',
+        sessionId: 'sess-1',
+        peer: { botId: 'bot-a', conversationKey: 'direct:x' },
+      },
+    }),
+  })
+  assert.equal(forged.status, 200)
+  assert.equal(forged.body.job.ownerEmpNo, 'tester')
+  assert.equal(forged.body.job.origin?.kind, 'web')
+
+  const denied = await jsonRequest(url, '/dsh-ops-cron/jobs', {
+    empNo: 'tester',
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'im-web',
+      prompt: 'x',
+      schedule: { kind: 'at', at: '2099-01-01T00:00:00.000Z', timezone: 'UTC' },
+      delivery: { kind: 'im', botId: 'bot-a', targetId: 't1' },
+    }),
+  })
+  assert.equal(denied.status, 400)
+  assert.equal(denied.body.code, 'IM_DELIVERY_FORBIDDEN')
+})
+
+test('resolveSessionPlacement refuses recent-workspace fallback for IM jobs without cwd', () => {
+  const recent = { id: 'ws-recent', path: '/tmp/wrong-recent', async attachSession() {} }
+  const ctx = {
+    get(name) {
+      if (name === 'workspaceRegistry') return { list: () => [recent] }
+      return undefined
+    },
+  }
+  const placed = resolveSessionPlacement(ctx, {
+    cwd: '',
+    ownerEmpNo: '__unassigned__',
+    origin: {
+      kind: 'im',
+      peer: { botId: 'bot-a', conversationKey: 'direct:1' },
+    },
+  })
+  assert.equal(placed.missingCwd, true)
+  assert.equal(placed.cwd, '')
 })
 
 test('adoptSessionIntoWorkspace attaches a fork whose cwd matches a workspace', async () => {
