@@ -596,6 +596,51 @@ test('makeLiveSessionPort creates with default model and setup', async () => {
   assert.equal(assembled.variables.model, 'deepseek-chat')
 })
 
+test('makeLiveSessionPort applies job permissionPreset when Host supports it', async () => {
+  const applied = []
+  const fakeSession = { id: 'sess-perm' }
+  const ctx = {
+    get(name) {
+      if (name === 'agentDefaultModel') {
+        return { currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-chat' }) }
+      }
+      if (name === 'permissionPresets') {
+        return {
+          set(session, preset) {
+            applied.push({ session, preset })
+          },
+        }
+      }
+      if (name === 'agents') {
+        return {
+          async create() {
+            const agent = createFakeAgent()
+            agent.session = fakeSession
+            return { agent, dispose: async () => {} }
+          },
+          get() {},
+        }
+      }
+      return undefined
+    },
+  }
+  const port = makeLiveSessionPort(ctx)
+  await port.createAndPrompt({
+    job: { name: 'elevated', timeoutMinutes: 1, permissionPreset: 'danger-full-access' },
+    run: {},
+    text: 'hi',
+  })
+  assert.deepEqual(applied, [{ session: fakeSession, preset: 'danger-full-access' }])
+
+  applied.length = 0
+  await port.createAndPrompt({
+    job: { name: 'default', timeoutMinutes: 1, permissionPreset: '' },
+    run: {},
+    text: 'hi',
+  })
+  assert.deepEqual(applied, [])
+})
+
 test('resolveDefaultModel fails loud when Models has no selection', async () => {
   await assert.rejects(
     () => resolveDefaultModel({ get: () => undefined }, { waitMs: 0 }),

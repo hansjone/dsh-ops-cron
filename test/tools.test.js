@@ -473,13 +473,15 @@ test('agentAccess deny is hidden from tools and blocks pause/delete', async (t) 
     timezone: 'Asia/Shanghai',
   }, {})
   assert.equal(created.job.agentAccess, undefined)
+  assert.equal(created.job.permissionPreset, undefined)
   assert.equal(created.job.id != null, true)
 
-  await service.updateJob(created.job.id, { agentAccess: 'deny' })
+  await service.updateJob(created.job.id, { agentAccess: 'deny', permissionPreset: 'danger-full-access' })
   const listed = await tools.cron_list.execute({}, {})
   const row = listed.jobs.find((job) => job.id === created.job.id)
   assert.ok(row)
   assert.equal(row.agentAccess, undefined)
+  assert.equal(row.permissionPreset, undefined)
 
   await assert.rejects(
     () => tools.cron_pause.execute({ id: created.job.id }, {}),
@@ -492,6 +494,17 @@ test('agentAccess deny is hidden from tools and blocks pause/delete', async (t) 
 
   const httpView = await service.getJob(created.job.id)
   assert.equal(httpView.agentAccess, 'deny')
+  assert.equal(httpView.permissionPreset, 'danger-full-access')
+})
+
+test('normalizePermissionPreset maps UI aliases and rejects junk', async () => {
+  const { normalizePermissionPreset } = await import('../lib/store.js')
+  assert.equal(normalizePermissionPreset(''), '')
+  assert.equal(normalizePermissionPreset({ permissionPreset: 'inherit' }), '')
+  assert.equal(normalizePermissionPreset('read-only'), 'read-only')
+  assert.equal(normalizePermissionPreset('workspace-write'), 'workspace-write')
+  assert.equal(normalizePermissionPreset('full'), 'danger-full-access')
+  assert.throws(() => normalizePermissionPreset('nope'), (err) => err.code === 'INVALID_PERMISSION_PRESET')
 })
 
 test('registerCronTools registers each definition and disposer unregisters', () => {
