@@ -409,6 +409,110 @@ test('retriggerJob fires recurring immediately and re-arms consumed oneshot', as
   assert.ok(httpHit.body.run?.id)
 })
 
+test('rescheduleJob moves pending one-shot next without dispatch', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  let clock = Date.parse('2026-08-24T01:00:00.000Z')
+  let fires = 0
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => clock,
+    sessionPort: {
+      async createAndPrompt() {
+        fires += 1
+        return { sessionId: `sess-${fires}`, status: 'succeeded', summary: 'ok' }
+      },
+      async archiveSession() {},
+    },
+  })
+
+  const pending = await service.createJob({
+    name: 'later',
+    prompt: 'do it',
+    enabled: false,
+    schedule: { kind: 'at', at: new Date(clock + 3600_000).toISOString(), timezone: 'UTC' },
+  })
+  const previous = pending.nextRunAt
+  assert.ok(previous > clock)
+
+  const moved = await service.rescheduleJob(pending.id, { after_minutes: 1 })
+  assert.equal(moved.ok, true)
+  assert.equal(moved.previousNextRunAt, previous)
+  assert.equal(moved.nextRunAt, clock + 60_000)
+  assert.equal(moved.job.enabled, false)
+  assert.equal(moved.job.nextRunAt, clock + 60_000)
+  assert.equal(fires, 0)
+
+  const asap = await service.rescheduleJob(pending.id, { after_minutes: 0 })
+  assert.equal(asap.nextRunAt, clock)
+  assert.equal(asap.job.enabled, false)
+
+  await assert.rejects(
+    () => service.rescheduleJob(pending.id, {}),
+    (err) => err.code === 'INVALID_RESCHEDULE',
+  )
+
+  const cron = await service.createJob({
+    name: 'cron',
+    prompt: 'loop',
+    schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' },
+  })
+  await assert.rejects(
+    () => service.rescheduleJob(cron.id, { after_minutes: 1 }),
+    (err) => err.code === 'INVALID_RESCHEDULE',
+  )
+
+  await service.store.mutate((state) => ({
+    ...state,
+    jobs: state.jobs.map((row) => (row.id === pending.id
+      ? { ...row, nextRunAt: null, lastStatus: 'succeeded' }
+      : row)),
+  }))
+  await assert.rejects(
+    () => service.rescheduleJob(pending.id, { after_minutes: 1 }),
+    (err) => err.code === 'INVALID_RESCHEDULE',
+  )
+
+  const waiting = await service.createJob({
+    name: 'waiting2',
+    prompt: 'soon',
+    cwd: '/tmp/user-workspaces/tester',
+    schedule: { kind: 'at', at: new Date(clock + 7200_000).toISOString(), timezone: 'UTC' },
+  }, { empNo: 'tester', displayName: 'Tester', permissions: { canViewAllSessions: false } })
+  await service.store.mutate((state) => ({
+    ...state,
+    runs: [
+      {
+        id: 'inflight-rs',
+        jobId: waiting.id,
+        status: 'running',
+        scheduledAt: clock,
+        actualAt: clock,
+        stateEnteredAt: clock,
+      },
+      ...(state.runs || []),
+    ],
+  }))
+  await assert.rejects(
+    () => service.rescheduleJob(waiting.id, { after_minutes: 1 }),
+    (err) => err.code === 'ALREADY_RUNNING',
+  )
+
+  const http = await listen(service)
+  t.after(() => http.close())
+  await service.store.mutate((state) => ({
+    ...state,
+    runs: (state.runs || []).filter((run) => run.id !== 'inflight-rs'),
+  }))
+  const httpHit = await jsonRequest(http.url, `/dsh-ops-cron/jobs/${waiting.id}/reschedule`, {
+    method: 'POST',
+    body: JSON.stringify({ after_minutes: 2 }),
+  })
+  assert.equal(httpHit.status, 200)
+  assert.equal(httpHit.body.nextRunAt, clock + 120_000)
+  assert.equal(httpHit.body.ok, true)
+})
+
 test('http api: anonymous list/run-now is rejected', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
