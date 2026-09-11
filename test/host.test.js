@@ -409,6 +409,44 @@ test('retriggerJob fires recurring immediately and re-arms consumed oneshot', as
   assert.ok(httpHit.body.run?.id)
 })
 
+test('retriggerJob fire-and-forget returns while live run is still running', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const archived = []
+  const sessionPort = makeLiveSessionPort(fakeLiveCtx(archived))
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => Date.parse('2026-08-24T01:00:00.000Z'),
+    sessionPort,
+  })
+
+  const job = await service.createJob({
+    name: 'detach-me',
+    prompt: 'slow work',
+    enabled: false,
+    schedule: { kind: 'at', at: new Date(Date.parse('2026-08-24T01:00:00.000Z') + 60_000).toISOString(), timezone: 'UTC' },
+  })
+  await service.store.mutate((state) => ({
+    ...state,
+    jobs: state.jobs.map((row) => (row.id === job.id
+      ? { ...row, nextRunAt: null, lastStatus: 'succeeded', enabled: false }
+      : row)),
+  }))
+
+  const started = await service.retriggerJob(job.id)
+  assert.equal(started.ok, true)
+  assert.equal(started.mode, 'started')
+  assert.equal(started.run.status, 'running')
+  assert.ok(started.run.sessionId)
+
+  await service.flushDetachedRuns()
+  const history = await service.listHistory(job.id)
+  const terminal = history.find((row) => row.id === started.run.id)
+  assert.ok(terminal)
+  assert.equal(terminal.status, 'succeeded')
+  assert.equal(terminal.summary, '测试成功')
+})
+
 test('rescheduleJob moves pending one-shot next without dispatch', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
