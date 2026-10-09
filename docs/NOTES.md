@@ -36,7 +36,7 @@ Loader id：`dsh-cron-tasks`
 
 `package.json` 必须同时有 `dsh.bundle.patch` 和 `dsh.client`（`platform: web`，`immediately: true`）。Host **不要** import `@deepseek-ai/*`，也不要把它写进 `dependencies`。工具用纯 `ToolDefinition`，不要 `defineTool`。
 
-Client `inject` 只写 `slots` / `locale` / `settingsScope`。静态 `inject: ['sessions']` 会在 boot 死锁；`sessions` / `workspaces` 用 `ctx.inject` 可选 + `internal/service`。
+Client 硬 `inject` 只写 `slots` / `locale`。不要硬注入 `settingsScope`：DSH ≥0.1.7 / 0.2.0 已删掉该服务（换成 `configForms`），硬等会让 web boot 卡在 pending。设置卡用软注入：`configForms` 优先，否则 `settingsScope`。静态 `inject: ['sessions']` 会在 boot 死锁；`sessions` / `workspaces` 用 `ctx.inject` 可选 + `internal/service`。
 
 ---
 

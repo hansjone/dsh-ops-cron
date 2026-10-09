@@ -10,6 +10,7 @@ export interface Config {
   historyLimit?: number
   overlapPolicy?: 'skip'
   misfirePolicy?: 'skip'
+  allowExternalCwd?: boolean
 }
 
 export function apply(ctx: Context, config?: Config): void

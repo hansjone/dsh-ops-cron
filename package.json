@@ -1,7 +1,7 @@
 {
   "name": "dsh-ops-cron",
   "description": "Scheduled tasks for DeepSeek Harness: Agent cron_* tools + sidebar 定时任务, with DSH or WhatsApp/IM delivery per job.",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": false,
   "type": "module",
   "repository": {
@@ -52,8 +52,8 @@
       "platform": "web",
       "immediately": true,
       "inject": [
-        "@deepseek-ai/dsh-client-ui-settings-plugins",
-        "@deepseek-ai/dsh-client-ui-sidebar"
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale"
       ]
     }
   },
