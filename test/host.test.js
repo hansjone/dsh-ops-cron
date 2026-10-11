@@ -31,6 +31,28 @@ function createFakeAgent() {
   }
 }
 
+test('cron stamps the owner before creating an agent and blocks unassigned or rejected owners', async t => {
+  const cwd = await mkdtemp(join(tmpdir(), 'cron-owner-order-'))
+  t.after(() => rm(cwd, { recursive: true, force: true }))
+  const calls = [], owners = new Map()
+  let accept = true
+  const auth = { stampSessionOwner(sid, owner) { calls.push('owner'); if (accept) owners.set(sid, owner); return accept } }
+  const agents = { async create({ sessionId }) {
+    assert.equal(owners.get(sessionId), 'u'); calls.push('create')
+    return { agent: { session: {}, followup() { assert.equal(owners.get(sessionId), 'u'); calls.push('followup') } } }
+  } }
+  const ctx = { get(name) { return { udsAuth: auth, agents, agentDefaultModel: { currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-chat' }) } }[name] } }
+  const port = makeLiveSessionPort(ctx)
+  await port.createAndPrompt({ job: { name: 'owned', ownerEmpNo: 'u', cwd }, text: 'test' })
+  assert.deepEqual(calls, ['owner', 'create', 'followup'])
+  calls.length = 0
+  await assert.rejects(port.createAndPrompt({ job: { name: 'unassigned', cwd }, text: 'test' }), { code: 'CRON_SESSION_OWNER_REQUIRED' })
+  assert.deepEqual(calls, [])
+  accept = false
+  await assert.rejects(port.createAndPrompt({ job: { name: 'disabled', ownerEmpNo: 'u', cwd }, text: 'test' }), { code: 'CRON_SESSION_OWNER_REQUIRED' })
+  assert.deepEqual(calls, ['owner'])
+})
+
 function fakeLiveCtx(archived) {
   const agentsById = new Map()
   return {
@@ -165,6 +187,7 @@ function mockUdsAuth(options = {}) {
     },
     stampSessionOwner(sessionId, empNo) {
       if (sessionId && empNo) owners.set(String(sessionId), String(empNo))
+      return !!(sessionId && empNo)
     },
     getSessionOwner(sessionId) {
       return owners.get(String(sessionId)) || null
