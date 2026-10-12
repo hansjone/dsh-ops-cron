@@ -160,3 +160,60 @@ test('one-shot misfire beyond grace skips and clears nextRunAt', () => {
   assert.equal(decision.reason, 'misfire')
   assert.equal(decision.nextRunAt, null)
 })
+
+test('zonedToUtc resolves wall times right after a DST spring-forward', () => {
+  // 2026-03-08 New York: 02:00 EST → 03:00 EDT. 04:00 exists (EDT, UTC-4).
+  assert.equal(
+    zonedToUtc({ year: 2026, month: 3, day: 8, hour: 4, minute: 0, second: 0 }, 'America/New_York'),
+    Date.parse('2026-03-08T08:00:00.000Z'),
+  )
+  // 02:30 is in the gap and does not exist.
+  assert.equal(
+    zonedToUtc({ year: 2026, month: 3, day: 8, hour: 2, minute: 30, second: 0 }, 'America/New_York'),
+    null,
+  )
+  const next = nextFire(
+    { kind: 'cron', expr: '0 4 * * *', timezone: 'America/New_York' },
+    Date.parse('2026-03-07T12:00:00.000Z'),
+  )
+  assert.equal(next, Date.parse('2026-03-08T08:00:00.000Z'))
+})
+
+test('nextFire stays fast for sparse and impossible expressions', () => {
+  const after = shanghai(2026, 8, 24, 10, 0)
+  const started = Date.now()
+  const weekly = nextFire({ kind: 'cron', expr: '0 9 * * 1', timezone: TZ }, after)
+  assert.equal(weekly, shanghai(2026, 8, 31, 9, 0))
+  assert.equal(nextFire({ kind: 'cron', expr: '0 0 30 2 *', timezone: TZ }, after), null)
+  assert.ok(Date.now() - started < 500, `took ${Date.now() - started}ms`)
+})
+
+test('nextFire matches a minute-by-minute brute force', () => {
+  const exprs = ['*/7 * * * *', '15 3,15 * * *', '0 0 1,15 * 5', '30 2 * * 0', '0 9-17/2 * 1-6 1-5']
+  const zones = [TZ, 'America/New_York', 'UTC']
+  const after = Date.parse('2026-03-01T00:00:00.000Z')
+  for (const timezone of zones) {
+    for (const expr of exprs) {
+      const parsed = parseCron(expr)
+      let brute = null
+      for (let ms = Math.floor(after / 60_000) * 60_000 + 60_000; ms < after + 40 * 86_400_000; ms += 60_000) {
+        const p = new Intl.DateTimeFormat('en-US', {
+          timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric',
+          hour: 'numeric', minute: 'numeric', hourCycle: 'h23', weekday: 'short',
+        }).formatToParts(new Date(ms)).reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {})
+        const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday)
+        const domStar = parsed.dayOfMonth.size === 31
+        const dowStar = parsed.dayOfWeek.size === 7
+        const domHit = parsed.dayOfMonth.has(Number(p.day))
+        const dowHit = parsed.dayOfWeek.has(weekday)
+        const dayOk = !domStar && !dowStar ? (domHit || dowHit) : ((domStar || domHit) && (dowStar || dowHit))
+        if (parsed.minute.has(Number(p.minute)) && parsed.hour.has(Number(p.hour))
+          && parsed.month.has(Number(p.month)) && dayOk) {
+          brute = ms
+          break
+        }
+      }
+      assert.equal(nextFire({ kind: 'cron', expr, timezone }, after), brute, `${expr} @ ${timezone}`)
+    }
+  }
+})

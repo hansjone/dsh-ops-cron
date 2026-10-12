@@ -1470,6 +1470,15 @@ test('waitForAgentTurn waits for running then idle, and fails if the agent never
   const missed = await waitForAgentTurn(idle, { startTimeoutMs: 50, turnTimeoutMs: 50 })
   assert.equal(missed.status, 'failed')
   assert.equal(missed.error, 'agent_never_started')
+
+  // Turn started and finished between two polls: status is idle again, but a reply exists.
+  const fast = {
+    status: 'idle',
+    whenIdle: async () => {},
+    session: { deriveMessages: () => [{ role: 'user' }, { role: 'assistant', content: [] }] },
+  }
+  const quick = await waitForAgentTurn(fast, { startTimeoutMs: 50, turnTimeoutMs: 50 })
+  assert.equal(quick.status, 'succeeded')
 })
 
 test('after one live-shaped dispatch, the next run-now still fires', async (t) => {
@@ -1527,15 +1536,100 @@ test('after a live-shaped due tick settles, the next due occurrence still fires'
   clock = job.nextRunAt
   const firstTick = await service.tick()
   assert.equal(firstTick.length, 1)
-  assert.equal(firstTick[0].run.status, 'succeeded')
+  // tick no longer blocks on the agent turn; settle happens in background.
+  assert.equal(firstTick[0].run.status, 'running')
+  await service.flushDetachedRuns()
 
   const afterFirst = (await service.listJobs())[0]
   clock = afterFirst.nextRunAt
   const secondTick = await service.tick()
   assert.equal(secondTick.length, 1)
-  assert.equal(secondTick[0].run.status, 'succeeded')
+  assert.equal(secondTick[0].run.status, 'running')
   assert.notEqual(secondTick[0].run.sessionId, firstTick[0].run.sessionId)
-  assert.notEqual(secondTick[0].run.status, 'skipped')
+  await service.flushDetachedRuns()
+
+  const history = await service.listHistory(job.id)
+  const statuses = [firstTick[0].run.id, secondTick[0].run.id]
+    .map((id) => history.find((row) => row.id === id)?.status)
+  assert.deepEqual(statuses, ['succeeded', 'succeeded'])
+})
+
+test('a long-running job does not make other jobs misfire-skip', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const base = Date.parse('2026-09-11T01:00:00.000Z')
+  let clock = base
+  let release
+  const slowTurn = new Promise((resolve) => { release = resolve })
+  const started = []
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => clock,
+    sessionPort: {
+      async createAndPrompt({ job }) {
+        started.push(job.name)
+        return { sessionId: `s-${job.name}`, status: 'running' }
+      },
+      async waitForTurn(sessionId) {
+        if (sessionId === 's-slow') await slowTurn
+        return { status: 'succeeded', summary: 'ok' }
+      },
+    },
+  })
+  await service.createJob({
+    name: 'slow',
+    prompt: 'long work',
+    schedule: { kind: 'at', at: new Date(base + 60_000).toISOString(), timezone: 'UTC' },
+  })
+  await service.createJob({
+    name: 'later',
+    prompt: 'due while slow runs',
+    schedule: { kind: 'at', at: new Date(base + 5 * 60_000).toISOString(), timezone: 'UTC' },
+  })
+  clock = base + 60_000
+  const first = await service.tick()
+  assert.equal(first.length, 1)
+  clock = base + 5 * 60_000
+  const second = await service.tick()
+  assert.equal(second.length, 1)
+  assert.deepEqual(started, ['slow', 'later'])
+  release()
+  await service.flushDetachedRuns()
+  const history = await service.listHistory()
+  assert.equal(history.filter((row) => row.reason === 'misfire').length, 0)
+})
+
+test('editing a finished one-shot keeps working after its time passed', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  let clock = Date.parse('2026-10-01T00:00:00.000Z')
+  const service = createTestHost({
+    filePath: join(dir, 'store.json'),
+    now: () => clock,
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 'once-1', status: 'succeeded', summary: 'ok' }
+      },
+    },
+  })
+  const job = await service.createJob({
+    name: 'once',
+    prompt: 'ping',
+    schedule: { kind: 'at', at: new Date(clock + 60_000).toISOString(), timezone: 'UTC' },
+  })
+  clock += 61_000
+  await service.tick()
+  clock += 3_600_000
+  const renamed = await service.updateJob(job.id, { name: 'renamed' })
+  assert.equal(renamed.name, 'renamed')
+  assert.equal(renamed.nextRunAt, null)
+  const paused = await service.pauseJob(job.id, false)
+  assert.equal(paused.enabled, false)
+  assert.equal(paused.nextRunAt, null)
+  await assert.rejects(
+    () => service.updateJob(job.id, { schedule: { kind: 'at', at: new Date(clock - 3_600_000).toISOString(), timezone: 'UTC' } }),
+    (err) => err.code === 'INVALID_AT',
+  )
 })
 
 
@@ -1777,4 +1871,47 @@ test('session mirror is off by default and runs only when mirrorToSession is tru
   assert.equal(patched.mirrorToSession, true)
   await service.dispatchRun(off.id, 'run-now')
   assert.equal(appended.length, 2)
+})
+
+test('watcher report.delivery=dsh injects the report into the watcher DSH session', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const clock = Date.parse('2026-10-01T00:00:00.000Z')
+  const appended = []
+  const agents = {
+    get(sessionId) {
+      if (sessionId !== 'origin-sess') return null
+      return { session: { append: (type, message) => appended.push({ type, message }) } }
+    },
+  }
+  const service = createHostService({
+    filePath: join(dir, 'store.json'),
+    now: () => clock,
+    getAgents: () => agents,
+    logger: {},
+    sessionPort: {
+      async createAndPrompt() {
+        return { sessionId: 'worker-run', status: 'succeeded', summary: 'done' }
+      },
+    },
+  })
+  const worker = await service.createJob({
+    name: 'worker',
+    prompt: 'work',
+    schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' },
+  })
+  await service.createJob({
+    name: 'watcher',
+    prompt: 'watch',
+    schedule: { kind: 'cron', expr: '0 9 * * *', timezone: 'UTC' },
+    origin: { kind: 'web', sessionId: 'origin-sess' },
+    watch: { taskId: worker.id },
+    report: { mode: 'on_complete', delivery: 'dsh' },
+  })
+  await service.dispatchRun(worker.id, 'run-now')
+  assert.equal(appended.length, 1)
+  assert.equal(appended[0].type, 'user/message')
+  const body = appended[0].message.content[0].text
+  assert.match(body, /\[cron watch\] watcher/)
+  assert.match(body, /worker: succeeded/)
 })

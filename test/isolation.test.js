@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   applyRunIsolation,
   isHiddenFromWorkspace,
+  pruneHiddenSessions,
   recordHiddenSession,
   shouldHideNativeWorkspaceGroup,
   shouldPromoteCronFork,
@@ -85,4 +86,13 @@ test('extractAssistantText returns the last assistant text, not a dispatch stub'
   assert.equal(text, '测试成功')
   assert.equal(extractAssistantText([]), '')
   assert.equal(extractAssistantText([{ role: 'assistant', content: [{ type: 'thinking', text: 'hmm' }] }]), '')
+})
+
+test('pruneHiddenSessions keeps run-referenced ids and the newest orphans', () => {
+  const state = {
+    hiddenSessionIds: ['o1', 'live', 'o2', 'o3', 'o4'],
+    runs: [{ id: 'r', sessionId: 'live' }],
+  }
+  assert.deepEqual(pruneHiddenSessions(state, 2).hiddenSessionIds, ['live', 'o3', 'o4'])
+  assert.equal(pruneHiddenSessions(state, 10), state)
 })

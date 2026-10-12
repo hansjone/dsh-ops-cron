@@ -15,7 +15,7 @@ import {
   readProgressSnapshot,
   selectJobsByWatch,
 } from '../lib/monitor.js'
-import { createJobRecord, emptyState, listHistoryPage, pruneRuns } from '../lib/store.js'
+import { createJobRecord, createStore, emptyState, listHistoryPage, pruneRuns } from '../lib/store.js'
 import { claimOccurrence, publicJob, settleRun } from '../lib/fire.js'
 import { createHostService } from '../lib/host.js'
 import { cronToolDefinitions } from '../lib/tools.js'
@@ -277,4 +277,27 @@ test('cron_query / cron_progress / cron_runs tools', async (t) => {
   )
   assert.deepEqual(normalizeLabels({ a: 1 }), { a: '1' })
   assert.ok(await readProgressSnapshot(created.job))
+})
+
+test('createJobRecord rejects a cron that never fires', () => {
+  assert.throws(
+    () => createJobRecord({
+      name: 'feb30',
+      prompt: 'x',
+      schedule: { kind: 'cron', expr: '0 0 30 2 *', timezone: 'UTC' },
+    }, emptyState(), Date.parse('2026-08-24T00:00:00.000Z')),
+    (error) => error.code === 'INVALID_CRON',
+  )
+})
+
+test('store: concurrent first read and mutate share one load', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-ops-cron-store-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const filePath = join(dir, 'store.json')
+  await writeFile(filePath, JSON.stringify({ ...emptyState(), hiddenSessionIds: ['old'] }), 'utf8')
+  const store = createStore({ filePath })
+  const reading = store.read()
+  const mutating = store.mutate((state) => ({ ...state, hiddenSessionIds: [...state.hiddenSessionIds, 'new'] }))
+  await Promise.all([reading, mutating])
+  assert.deepEqual(store.snapshot().hiddenSessionIds, ['old', 'new'])
 })
